@@ -68,8 +68,8 @@ class VideoDownloader:
             return {'Download error': str(e)}
 
     def _find_file(self, title: str) -> str:
-        first_word    = title.strip().split()[0].lower()
-        dir_files     = os.listdir(DOWNLOAD_DIR)
+        first_word = title.strip().split()[0].lower()
+        dir_files = os.listdir(DOWNLOAD_DIR)
         matched_files = [f for f in dir_files if f.lower().startswith(first_word)]
 
         candidates = matched_files if matched_files else dir_files
