@@ -65,7 +65,7 @@ class VideoDownloader:
             }
 
         except Exception as e:
-            return {'Download error': str(e)}
+            return {'Download error': str(e).split("please report")[0]}
 
     def _find_file(self, title: str) -> str:
         first_word = title.strip().split()[0].lower()
