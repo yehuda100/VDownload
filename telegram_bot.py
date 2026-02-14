@@ -27,7 +27,7 @@ class TelegramVideoBot:
         try:
             result = await self.downloader.download(url)
             if not result.get("success"):
-                await msg.edit_text(f"❌ שגיאה: {result.get('error')}")
+                await msg.edit_text(f"❌ שגיאת הורדה: {result.get('Download error')}")
                 return
             filename, title, size = result['filename'], result['title'], result['size']
             await msg.edit_text("📤 מעלה את הסרטון...")
