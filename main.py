@@ -2,11 +2,13 @@ import threading
 import asyncio
 import logging
 import uvicorn
+import time
 from bot_token import BOT_TOKEN, URL, USER_ID
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from telegram_bot import TelegramVideoBot
 from telegram import BotCommand
 from api_server import app
+from downloader import VideoDownloader
 
 
 logging.basicConfig(
@@ -14,6 +16,15 @@ logging.basicConfig(
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
+
+
+def run_cleanup():
+    while True:
+        try:
+            VideoDownloader().cleanup()
+        except Exception as e:
+            logger.error(f"Error during cleanup: {e}")
+        time.sleep(3600)
 
 
 def run_bot():
@@ -42,6 +53,6 @@ def run_api():
 
 if __name__ == "__main__":
     threading.Thread(target=run_api, daemon=True).start()
+    threading.Thread(target=run_cleanup, daemon=True).start()
     run_bot()
 
-#TODO: cleanup old files in download dir every hour or so

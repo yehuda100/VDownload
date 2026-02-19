@@ -1,9 +1,11 @@
+import json
 import os
 import time
 import asyncio
 import uuid
 import yt_dlp
 from telegram import Message
+from secure_links import TEMP_LINKS_DIR
 
 DOWNLOAD_DIR = "protected_downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
@@ -86,6 +88,21 @@ class VideoDownloader:
 
         except Exception as e:
             return {'Download error': str(e).split("please report")[0]}
+        
+    def cleanup(self):
+        now = time.time()
+        for filename in os.listdir(TEMP_LINKS_DIR):
+            with open(os.path.join(TEMP_LINKS_DIR, f"{filename}.json"), "r") as f:
+                meta = json.load(f)
+            if meta['expiry'] < now:
+                os.remove(os.path.join(TEMP_LINKS_DIR, f"{filename}.json"))
+                file_path = os.path.join(DOWNLOAD_DIR, meta['filename'])
+                if os.path.isfile(file_path):
+                    os.remove(file_path)
+        for filename in os.listdir(DOWNLOAD_DIR):
+            file_path = os.path.join(DOWNLOAD_DIR, filename)
+            if os.path.isfile(file_path) and now - os.path.getmtime(file_path) > 36 * 3600:
+                os.remove(file_path)
     
 async def update_progress(self, text: str):
     try:

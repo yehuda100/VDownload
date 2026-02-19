@@ -2,7 +2,6 @@ import os
 import aiofiles
 import time
 from telegram import Update
-from telegram.constants import ChatAction
 from telegram.ext import ContextTypes
 from downloader import VideoDownloader, DOWNLOAD_DIR
 from secure_links import SecureLinkManager
