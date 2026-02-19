@@ -13,6 +13,28 @@ class VideoDownloader:
         self.loop: asyncio.AbstractEventLoop = None
         self._last_update: float = 0.0
 
+    def build_options(self, format_type: str) -> dict:
+        opts = {
+            'output': f'{DOWNLOAD_DIR}/%(title).25s.%(ext)s',
+            'restrictfilenames': True,
+            'noplaylist': True,
+            'progress_hooks': [self._progress_hook]
+        }
+        if format_type == "mp3":
+            opts.update({
+                'format': 'bestaudio/best',
+                "postprocessors": [
+                {"key": "FFmpegExtractAudio", "preferredcodec": "mp3"}
+                ]
+            })
+        else:
+            opts.update({
+                'format': 'bestvideo[ext=mp4][height<=720]+bestaudio[ext=m4a]/bestvideo[height<=720]+bestaudio/best',
+                'merged_output_format': 'mp4'
+            })
+        return opts
+
+
     def _progress_hook(self, d: dict) -> None:
         if d.get('status') != 'downloading' or not self.status_msg:
             return
@@ -32,7 +54,7 @@ class VideoDownloader:
             self.loop
         )
 
-    async def download(self, url: str) -> dict:
+    async def download(self, url: str, format_type: str) -> dict:
         try:
             self.loop = asyncio.get_running_loop()
 
@@ -41,18 +63,7 @@ class VideoDownloader:
                     None, ydl.extract_info, url, False
                 )
             title = info.get("title", "ללא שם")
-            ydl_opts = {
-                'format': 'best[height<=720]/best',
-                'merged_output_format': 'mp4',
-                'outtmpl': f'{DOWNLOAD_DIR}/%(title).25s.%(ext)s',
-                'restrictfilenames': True,
-                'noplaylist': True,
-                'progress_hooks': [self._progress_hook],
-            }
-
-            if any(d in url.lower() for d in ['youtube.com', 'youtu.be']):
-                ydl_opts['format'] = 'bestvideo[height<=720]+bestaudio/best[height<=720]'
-
+            ydl_opts = self.build_options(format_type)
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 await self.loop.run_in_executor(None, ydl.download, [url])
 

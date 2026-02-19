@@ -15,6 +15,15 @@ class TelegramVideoBot:
         self.linker = SecureLinkManager()
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        VideoDownloader.format_type = "mp4"
+        await update.message.reply_text("🎬 שלח קישור ואני אוריד לך את הסרטון!")
+
+    async def mp3(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        context.user_data["format"] = "mp3"
+        await update.message.reply_text("🎵 שלח קישור ואני אוריד לך את השיר!")
+
+    async def mp4(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        context.user_data["format"] = "mp4"
         await update.message.reply_text("🎬 שלח קישור ואני אוריד לך את הסרטון!")
 
     async def no_entry(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -25,7 +34,7 @@ class TelegramVideoBot:
         msg = await update.message.reply_text("🔄 מתחיל להוריד...")
         self.downloader.status_msg = msg
         try:
-            result = await self.downloader.download(url)
+            result = await self.downloader.download(url, format_type=context.user_data.get("format", "mp4"))
             if not result.get("success"):
                 await msg.edit_text(f"❌ שגיאת הורדה: {result.get('Download error')}")
                 return

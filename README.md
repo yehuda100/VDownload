@@ -5,7 +5,7 @@ A private Telegram bot that downloads videos from various platforms (YouTube, et
 
 ## Features
 
-- 🎬 Downloads videos from multiple platforms using yt-dlp
+- 🎬 Downloads video or audio from multiple platforms using yt-dlp
 - 📱 Direct upload for small files (<50MB)
 - 🔗 Secure temporary download links for larger files
 - 📊 Real-time download progress updates
@@ -42,7 +42,8 @@ python main.py
 
 ## Usage
 
-1. Send `/start` to initialize the bot
+1. Send `/start` to initialize the bot or to reset
+2. Set your mode with `/mp3` or `/mp4`, The bot will keep this setting until you switch it.
 2. Send any video URL to download
 3. For files <50MB: Direct upload to chat
 4. For larger files: Secure download link (expires in 24h)
