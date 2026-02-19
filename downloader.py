@@ -1,6 +1,7 @@
 import os
 import time
 import asyncio
+import uuid
 import yt_dlp
 from telegram import Message
 
@@ -8,17 +9,18 @@ DOWNLOAD_DIR = "protected_downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 class VideoDownloader:
-    def __init__(self) -> None:
-        self.status_msg: Message = None
+    def __init__(self, status_msg: Message = None) -> None:
+        self.status_msg: Message = status_msg
         self.loop: asyncio.AbstractEventLoop = None
-        self._last_update: float = 0.0
+        self.last_progress_update: float = 0.0
 
-    def build_options(self, format_type: str) -> dict:
+    def build_options(self, file_id: str, format_type: str) -> dict:
         opts = {
-            'output': f'{DOWNLOAD_DIR}/%(title).25s.%(ext)s',
-            'restrictfilenames': True,
+            'quiet': True, 
+            'no_warnings': True,
             'noplaylist': True,
-            'progress_hooks': [self._progress_hook]
+            'progress_hooks': [self._progress_hook],
+            'outtmpl': f'{DOWNLOAD_DIR}/{file_id}.%(ext)s'
         }
         if format_type == "mp3":
             opts.update({
@@ -36,56 +38,57 @@ class VideoDownloader:
 
 
     def _progress_hook(self, d: dict) -> None:
-        if d.get('status') != 'downloading' or not self.status_msg:
+        if d.get('status') != 'downloading':
+            return
+        
+        if not self.status_msg or not self.loop:
             return
 
         now = time.monotonic()
-        if now - self._last_update < 1.0:
+        if now - self.last_progress_update < 2.0:
             return
-        self._last_update = now
-        total = d.get('total_bytes') or d.get('total_bytes_estimate') or 1
+        self.last_progress_update = now
+        total = d.get('total_bytes') or d.get('total_bytes_estimate')
         downloaded = d.get('downloaded_bytes', 0)
-        percent = downloaded / total * 100
-        title = d.get('info_dict', {}).get('title', 'וידאו')
+        percent = downloaded / total * 100 if total else 0
+        title = d.get('info_dict', {}).get('title', 'unknown')
         text = f"⬇️ {title}\n📊 התקדמות: {percent:.1f}%"
 
-        asyncio.run_coroutine_threadsafe(
-            self.status_msg.edit_text(text),
-            self.loop
+        self.loop.call_soon_threadsafe(
+            lambda: asyncio.create_task(self.update_progress(text))
         )
 
     async def download(self, url: str, format_type: str) -> dict:
         try:
             self.loop = asyncio.get_running_loop()
+            file_id = str(uuid.uuid4())
+            ydl_opts = self.build_options(file_id, format_type)
 
-            with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
-                info = await self.loop.run_in_executor(
-                    None, ydl.extract_info, url, False
-                )
-            title = info.get("title", "ללא שם")
-            ydl_opts = self.build_options(format_type)
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                await self.loop.run_in_executor(None, ydl.download, [url])
+                info = await self.loop.run_in_executor(
+                    None, lambda: ydl.extract_info(url, download=True)
+                )
 
-            file = self._find_file(title)
+            if 'requested_downloads' in info and info['requested_downloads']:
+                final_path = info['requested_downloads'][0].get('filepath')
+            else:
+                final_path = ydl.prepare_filename(info)
+
+            filename = os.path.basename(final_path)
+            ext = os.path.splitext(filename)[1]
+
             return {
-                'filename': file,
-                'title': title,
-                'size': os.path.getsize(file),
+                'filename': filename,
+                'title': f"{info.get('title', 'unknown')}.{ext}",
+                'size': os.path.getsize(final_path),
                 'success': True
             }
 
         except Exception as e:
             return {'Download error': str(e).split("please report")[0]}
-
-    def _find_file(self, title: str) -> str:
-        first_word = title.strip().split()[0].lower()
-        dir_files = os.listdir(DOWNLOAD_DIR)
-        matched_files = [f for f in dir_files if f.lower().startswith(first_word)]
-
-        candidates = matched_files if matched_files else dir_files
-        candidates.sort(
-            key=lambda x: os.path.getctime(os.path.join(DOWNLOAD_DIR, x)),
-            reverse=True
-        )
-        return os.path.join(DOWNLOAD_DIR, candidates[0]) if candidates else None
+    
+async def update_progress(self, text: str):
+    try:
+        await self.status_msg.edit_text(text)
+    except Exception:
+        pass 

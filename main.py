@@ -43,3 +43,5 @@ def run_api():
 if __name__ == "__main__":
     threading.Thread(target=run_api, daemon=True).start()
     run_bot()
+
+#TODO: cleanup old files in download dir every hour or so
