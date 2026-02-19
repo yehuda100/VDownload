@@ -1,4 +1,5 @@
 import threading
+import asyncio
 import logging
 import uvicorn
 from bot_token import BOT_TOKEN, URL, USER_ID
@@ -23,11 +24,13 @@ def run_bot():
     app.add_handler(CommandHandler("mp4", bot.mp4))
     app.add_handler(MessageHandler(filters.Chat(USER_ID) & filters.TEXT & ~filters.COMMAND, bot.handle_url))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.no_entry))
-    app.bot.set_my_commands([
+
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(app.bot.set_my_commands([
         BotCommand("start", "התחל"),
         BotCommand("mp3", "הורד שיר"),
         BotCommand("mp4", "הורד סרטון")
-    ])
+    ]))
     app.run_webhook(listen="127.0.0.1", 
                     port=8003, 
                     url_path=BOT_TOKEN, 
