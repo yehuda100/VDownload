@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 def run_bot():
     bot = TelegramVideoBot()
-    app = Application.builder().token('304491376:AAGxkyC3jz12VrBr5vWGimIu4I2A47SQ9tY').build()
+    app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", bot.start))
     app.add_handler(CommandHandler("mp3", bot.mp3))
     app.add_handler(CommandHandler("mp4", bot.mp4))
@@ -28,11 +28,11 @@ def run_bot():
         BotCommand("mp3", "הורד שיר"),
         BotCommand("mp4", "הורד סרטון")
     ])
-    # app.run_webhook(listen="127.0.0.1", 
-    #                 port=8003, 
-    #                 url_path=BOT_TOKEN, 
-    #                 webhook_url=URL + BOT_TOKEN)
-    app.run_polling()
+    app.run_webhook(listen="127.0.0.1", 
+                    port=8003, 
+                    url_path=BOT_TOKEN, 
+                    webhook_url=URL + BOT_TOKEN)
+
 
 def run_api():
     uvicorn.run(app, host="127.0.0.1", port=5000)
