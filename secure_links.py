@@ -1,6 +1,5 @@
 import os
 import time
-import uuid
 import hashlib
 import hmac
 import json
@@ -12,21 +11,20 @@ os.makedirs(TEMP_LINKS_DIR, exist_ok=True)
 
 class SecureLinkManager:
     @staticmethod
-    def generate(filename, title):
-        fid = str(uuid.uuid4())
+    def save_metadata(filename, title) -> str:
         expiry = int(time.time()) + EXPIRY
-        data = f"{fid}:{filename}:{expiry}"
+        data = f"{title}:{filename}:{expiry}"
         sig = hmac.new(SECRET_KEY.encode(), data.encode(), hashlib.sha256).hexdigest()
-        with open(os.path.join(TEMP_LINKS_DIR, f"{fid}.json"), 'w', encoding='utf-8') as f:
+        with open(os.path.join(TEMP_LINKS_DIR, f"{filename}.json"), 'w', encoding='utf-8') as f:
             json.dump({'filename': filename, 'title': title, 'expiry': expiry, 'signature': sig}, f)
-        return f"{URL}VDownload/{fid}?sig={sig}"
+        return f"{URL}VDownload/{filename}?sig={sig}"
 
     @staticmethod
-    def verify(fid, sig):
-        path = os.path.join(TEMP_LINKS_DIR, f"{fid}.json")
+    def verify(filename, sig):
+        path = os.path.join(TEMP_LINKS_DIR, f"{filename}.json")
         if not os.path.exists(path): return None
         info = json.load(open(path, 'r', encoding='utf-8'))
         if time.time() > info['expiry']: os.remove(path); return None
-        expected = hmac.new(SECRET_KEY.encode(), f"{fid}:{info['filename']}:{info['expiry']}".encode(), hashlib.sha256).hexdigest()
+        expected = hmac.new(SECRET_KEY.encode(), f"{info['title']}:{filename}:{info['expiry']}".encode(), hashlib.sha256).hexdigest()
         if sig != expected: return None
         return info['filename']
