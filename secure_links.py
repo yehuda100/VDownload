@@ -9,6 +9,7 @@ TEMP_LINKS_DIR = "temp_links"
 EXPIRY = 24 * 3600
 os.makedirs(TEMP_LINKS_DIR, exist_ok=True)
 
+
 class SecureLinkManager:
     @staticmethod
     def save_metadata(filename, title) -> str:
@@ -22,9 +23,14 @@ class SecureLinkManager:
     @staticmethod
     def verify(filename, sig):
         path = os.path.join(TEMP_LINKS_DIR, f"{filename}.json")
-        if not os.path.exists(path): return None
-        info = json.load(open(path, 'r', encoding='utf-8'))
-        if time.time() > info['expiry']: os.remove(path); return None
+        if not os.path.exists(path): 
+            return None
+        with open(path, 'r', encoding='utf-8') as f:
+            info = json.load(f)
+        if time.time() > info['expiry']: 
+            os.remove(path)
+            return None
         expected = hmac.new(SECRET_KEY.encode(), f"{info['title']}:{filename}:{info['expiry']}".encode(), hashlib.sha256).hexdigest()
-        if sig != expected: return None
+        if not hmac.compare_digest(sig, expected):
+            return None
         return info['filename']
