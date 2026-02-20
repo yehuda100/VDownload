@@ -33,7 +33,9 @@ def run_bot():
     app.add_handler(CommandHandler("start", bot.start))
     app.add_handler(CommandHandler("mp3", bot.mp3))
     app.add_handler(CommandHandler("mp4", bot.mp4))
-    app.add_handler(MessageHandler(filters.Chat(USER_ID) & filters.TEXT & ~filters.COMMAND, bot.handle_url))
+    app.add_handler(MessageHandler(filters.Chat(USER_ID) \
+                                   & filters.TEXT & ~filters.COMMAND\
+                                    &filters.Regex(r'^https?://'), bot.handle_url))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.no_entry))
 
     loop = asyncio.get_event_loop()
