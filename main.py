@@ -1,14 +1,14 @@
-import threading
+import time
 import asyncio
 import logging
 import uvicorn
-import time
-from bot_token import BOT_TOKEN, URL, USER_ID
-from telegram.ext import Application, CommandHandler, MessageHandler, filters
-from telegram_bot import TelegramVideoBot
-from telegram import BotCommand
+import threading
 from api_server import app
 from downloader import VideoDownloader
+from bot_token import BOT_TOKEN, URL, USER_ID
+from telegram import BotCommand
+from telegram.ext import Application, CommandHandler, MessageHandler, filters
+from telegram_bot import TelegramVideoBot
 
 
 logging.basicConfig(

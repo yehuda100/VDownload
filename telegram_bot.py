@@ -1,7 +1,6 @@
 import os
-import aiofiles
-import time
-from telegram import Update
+import asyncio
+from telegram import Message, Update
 from telegram.ext import ContextTypes
 from downloader import VideoDownloader, DOWNLOAD_DIR
 from secure_links import SecureLinkManager
@@ -38,20 +37,26 @@ class TelegramVideoBot:
                 await msg.edit_text(f"❌ שגיאת הורדה: {result.get('Download error')}")
                 return
             filename, title, size = result['filename'], result['title'], result['size']
+            filepath = os.path.join(DOWNLOAD_DIR, filename)
             await msg.edit_text("📤 מעלה את הקובץ...")
             if size <= MAX_SIZE:
-                if filename.endswith(('.mp3', '.m4a', '.ogg', '.opus')):
-                    async with aiofiles.open(filename, 'rb') as f:
-                        await update.message.reply_audio(audio=await f.read(), filename=title)
-                else:
-                    async with aiofiles.open(filename, 'rb') as f:
-                        await update.message.reply_video(video=await f.read(), filename=title, supports_streaming=True)
-                os.remove(filename)
+                asyncio.create_task(
+                    self._send_file(update, msg, filepath, title)
+                    )
             else:
-                link = SecureLinkManager().generate(filename, title)
+                await msg.delete()
+                link = SecureLinkManager().save_metadata(filename, title)
                 mb = size / 1024 / 1024
                 await update.message.reply_text(f"🔗 הסרטון גדול מדי ({mb:.1f}MB)\n📥 {title}\n{link}")
-            await msg.delete()
         except Exception as e:
             await msg.edit_text(f"❌ שגיאה: {str(e)}")
 
+    async def _send_file(self, update: Update, msg: Message, filepath: str, title: str):
+        if filepath.endswith(('.mp3', '.m4a', '.ogg', '.opus')):
+            with open(filepath, 'rb') as f:
+                await update.message.reply_audio(audio=f, filename=title)
+        else:
+            with open(filepath, 'rb') as f:
+                await update.message.reply_video(video=f, filename=title, supports_streaming=True)
+        await msg.delete()
+        os.remove(filepath)

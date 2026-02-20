@@ -1,8 +1,8 @@
-import json
 import os
+import json
 import time
-import asyncio
 import uuid
+import asyncio
 import yt_dlp
 from telegram import Message
 from secure_links import TEMP_LINKS_DIR
@@ -38,26 +38,25 @@ class VideoDownloader:
             })
         return opts
 
-
     def _progress_hook(self, d: dict) -> None:
         if d.get('status') != 'downloading':
             return
-        
         if not self.status_msg or not self.loop:
             return
 
         now = time.monotonic()
-        if now - self.last_progress_update < 2.0:
+        if now - self.last_progress_update < 1.0:
             return
         self.last_progress_update = now
-        total = d.get('total_bytes') or d.get('total_bytes_estimate')
+        total = d.get('total_bytes') or d.get('total_bytes_estimate') or 1
         downloaded = d.get('downloaded_bytes', 0)
-        percent = downloaded / total * 100 if total else 0
-        title = d.get('info_dict', {}).get('title', 'unknown')
+        percent = downloaded / total * 100
+        title = d.get('info_dict', {}).get('title', 'וידאו')
         text = f"⬇️ {title}\n📊 התקדמות: {percent:.1f}%"
 
-        self.loop.call_soon_threadsafe(
-            lambda: asyncio.create_task(self.update_progress(text))
+        asyncio.run_coroutine_threadsafe(
+            self.status_msg.edit_text(text),
+            self.loop
         )
 
     async def download(self, url: str, format_type: str) -> dict:
@@ -104,8 +103,8 @@ class VideoDownloader:
             if os.path.isfile(file_path) and now - os.path.getmtime(file_path) > 36 * 3600:
                 os.remove(file_path)
     
-async def update_progress(self, text: str):
-    try:
-        await self.status_msg.edit_text(text)
-    except Exception:
-        pass 
+    async def _update_progress(self, text: str):
+        try:
+            await self.status_msg.edit_text(text)
+        except Exception:
+            pass 
