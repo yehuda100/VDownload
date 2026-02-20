@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import time
 import uuid
@@ -7,7 +8,9 @@ import yt_dlp
 from telegram import Message
 from secure_links import TEMP_LINKS_DIR
 
+
 DOWNLOAD_DIR = "protected_downloads"
+USE_COOKIES = os.path.exists('cookies.txt') and "--cookies" in sys.argv
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 class VideoDownloader:
@@ -24,6 +27,8 @@ class VideoDownloader:
             'progress_hooks': [self._progress_hook],
             'outtmpl': f'{DOWNLOAD_DIR}/{file_id}.%(ext)s'
         }
+        if USE_COOKIES:
+            opts['cookiefile'] = 'cookies.txt'
         if format_type == "mp3":
             opts.update({
                 'format': 'bestaudio/best',
