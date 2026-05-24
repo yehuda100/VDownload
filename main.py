@@ -38,9 +38,9 @@ def run_cleanup_loop() -> None:
 
 async def _post_init(application: Application) -> None:
     await application.bot.set_my_commands([
-        BotCommand("start", "התחל"),
-        BotCommand("mp3", "הורד שיר"),
-        BotCommand("mp4", "הורד סרטון"),
+        BotCommand("start", "Start the bot"),
+        BotCommand("mp3", "Download audio (MP3)"),
+        BotCommand("mp4", "Download video (MP4)"),
     ])
 
 

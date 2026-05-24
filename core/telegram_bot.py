@@ -52,15 +52,15 @@ class TelegramVideoBot:
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         context.user_data["format"] = "mp4"
-        await update.message.reply_text("🎬 שלח קישור ואני אוריד לך את הסרטון!")
+        await update.message.reply_text("🎬 Send a link and I'll download the video for you!")
 
     async def mp3(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         context.user_data["format"] = "mp3"
-        await update.message.reply_text("🎵 שלח קישור ואני אוריד לך את השיר!")
+        await update.message.reply_text("🎵 Send a link and I'll download the audio for you!")
 
     async def mp4(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         context.user_data["format"] = "mp4"
-        await update.message.reply_text("🎬 שלח קישור ואני אוריד לך את הסרטון!")
+        await update.message.reply_text("🎬 Send a link and I'll download the video for you!")
 
     async def no_entry(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         user_id, username, chat_id = _user_from_update(update)
@@ -70,13 +70,13 @@ class TelegramVideoBot:
             chat_id,
             reason="message_from_non_allowed_user",
         )
-        await update.message.reply_text("🚫 אם אתה לא @yehuda100 – זה לא בשבילך 🤖")
+        await update.message.reply_text("🚫 This bot is not available for you.")
 
     async def handle_url(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         url = extract_url(update.message.text)
         if not url:
             await update.message.reply_text(
-                "❌ לא מצאתי קישור בהודעה שלך. אנא שלח קישור תקין."
+                "❌ No link found in your message. Please send a valid URL."
             )
             return
 
@@ -94,12 +94,12 @@ class TelegramVideoBot:
             )
         except DownloaderException as e:
             log_download_failed(request, e, stage="download")
-            await status_updater.update(f"❌ ההורדה נכשלה: {e}")
+            await status_updater.update(f"❌ Download failed: {e}")
             return
         except Exception as e:
             log_download_failed(request, e, stage="download_unexpected")
             logger.exception("Unexpected error while downloading %s", url)
-            await status_updater.update("❌ שגיאה לא צפויה. נסה שוב מאוחר יותר.")
+            await status_updater.update("❌ Unexpected error. Please try again later.")
             return
 
         file = await asyncio.to_thread(find_file, result["file_id"])
@@ -112,7 +112,7 @@ class TelegramVideoBot:
                 url,
                 provider,
             )
-            await status_updater.update("❌ לא מצאתי את הקובץ שהורד. אנא נסה שוב.")
+            await status_updater.update("❌ Download finished but the file was not found. Please try again.")
             return
 
         file_size = await asyncio.to_thread(lambda: file.stat().st_size)
@@ -124,7 +124,7 @@ class TelegramVideoBot:
             )
             mb = file_size / 1024 / 1024
             await update.message.reply_text(
-                f"🔗 הסרטון גדול מדי ({mb:.1f}MB)\n📥 {result['title']}\n{link}"
+                f"🔗 File too large for Telegram ({mb:.1f} MB)\n📥 {result['title']}\n{link}"
             )
             await status_updater.delete()
             log_download_success(
@@ -136,13 +136,13 @@ class TelegramVideoBot:
             )
             return
 
-        await status_updater.update("📤 שולח את הקובץ ל-Telegram...")
+        await status_updater.update("📤 Sending file to Telegram...")
         try:
             await self._send_file(update, update.message, filepath, result["title"])
         except Exception as e:
             log_download_failed(request, e, stage="telegram_send")
             logger.exception("Failed to send file to Telegram: %s", filepath)
-            await status_updater.update("❌ שליחה ל-Telegram נכשלה.")
+            await status_updater.update("❌ Failed to send file to Telegram.")
             return
 
         await status_updater.delete()
