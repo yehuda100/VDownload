@@ -21,7 +21,7 @@ from core.download_audit import (
     log_unauthorized_access,
 )
 from downloaders.exceptions import DownloaderException
-from utils import extract_url, find_file
+from utils import build_display_filename, extract_url, find_file
 
 logger = logging.getLogger(__name__)
 
@@ -117,10 +117,11 @@ class TelegramVideoBot:
 
         file_size = await asyncio.to_thread(lambda: file.stat().st_size)
         filepath = str(file.absolute())
+        display_name = build_display_filename(result["title"], filepath)
 
         if file_size >= MAX_SIZE:
             link = SecureLinkManager.save_metadata(
-                result["file_id"], filepath, result["title"]
+                result["file_id"], filepath, display_name
             )
             mb = file_size / 1024 / 1024
             await update.message.reply_text(
@@ -138,7 +139,7 @@ class TelegramVideoBot:
 
         await status_updater.update("📤 Sending file to Telegram...")
         try:
-            await self._send_file(update, update.message, filepath, result["title"])
+            await self._send_file(update, update.message, filepath, display_name)
         except Exception as e:
             log_download_failed(request, e, stage="telegram_send")
             logger.exception("Failed to send file to Telegram: %s", filepath)

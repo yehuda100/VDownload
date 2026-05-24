@@ -9,6 +9,7 @@ from fastapi.responses import HTMLResponse
 
 from core import SecureLinkManager
 from core.download_audit import log_link_access
+from utils import build_display_filename
 
 logger = logging.getLogger(__name__)
 app = FastAPI()
@@ -66,11 +67,12 @@ async def download_file(file_id: str, request: Request):
         client_ip=client_ip,
         success=True,
     )
-    filename = os.path.basename(verified["filename"])
+    disk_name = os.path.basename(verified["filename"])
+    download_name = build_display_filename(verified["title"], verified["filename"])
     return Response(
         content="",
         headers={
-            "X-Accel-Redirect": f"/protected_downloads/{filename}",
-            "Content-Disposition": f"attachment; filename*=UTF-8''{verified['title']}",
+            "X-Accel-Redirect": f"/protected_downloads/{disk_name}",
+            "Content-Disposition": f"attachment; filename*=UTF-8''{download_name}",
         },
     )
