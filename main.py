@@ -1,5 +1,4 @@
 """Entry point: Telegram webhook bot, FastAPI link server, and cleanup thread."""
-import asyncio
 import logging
 import threading
 import time
@@ -37,9 +36,22 @@ def run_cleanup_loop() -> None:
         time.sleep(3600)
 
 
+async def _post_init(application: Application) -> None:
+    await application.bot.set_my_commands([
+        BotCommand("start", "התחל"),
+        BotCommand("mp3", "הורד שיר"),
+        BotCommand("mp4", "הורד סרטון"),
+    ])
+
+
 def run_bot() -> None:
     bot = TelegramVideoBot()
-    telegram_app = Application.builder().token(BOT_TOKEN).build()
+    telegram_app = (
+        Application.builder()
+        .token(BOT_TOKEN)
+        .post_init(_post_init)
+        .build()
+    )
 
     telegram_app.add_handler(CommandHandler("start", bot.start))
     telegram_app.add_handler(CommandHandler("mp3", bot.mp3))
@@ -49,14 +61,6 @@ def run_bot() -> None:
         MessageHandler(filters.TEXT & ~filters.COMMAND, bot.no_entry)
     )
 
-    async def set_commands() -> None:
-        await telegram_app.bot.set_my_commands([
-            BotCommand("start", "התחל"),
-            BotCommand("mp3", "הורד שיר"),
-            BotCommand("mp4", "הורד סרטון"),
-        ])
-
-    asyncio.run(set_commands())
     telegram_app.run_webhook(
         listen="127.0.0.1",
         port=8003,
