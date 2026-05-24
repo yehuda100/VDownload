@@ -213,3 +213,10 @@ __marimo__/
 *key*
 *.pem
 *.key
+config.py
+
+# temp files
+temp_links/
+protected_downloads/
+test.py
+old/

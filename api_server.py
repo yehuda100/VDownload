@@ -1,29 +1,76 @@
+"""
+FastAPI endpoint for secure large-file downloads (nginx X-Accel-Redirect).
+"""
+import logging
 import os
+
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import HTMLResponse
-from secure_links import SecureLinkManager
 
+from core import SecureLinkManager
+from core.download_audit import log_link_access
+
+logger = logging.getLogger(__name__)
 app = FastAPI()
 
-@app.get("/VDownload/{file_id}")
-async def download_file(file_id: str, request: Request):
-    sig = request.query_params.get("sig")
-    filename, title = SecureLinkManager.verify(file_id, sig)
-    if not filename or not os.path.exists(filename):
-        error_html = """
+
+def _client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    if request.client:
+        return request.client.host
+    return "unknown"
+
+
+def _not_found_html(title: str = "N/A") -> str:
+    return f"""
     <div style="text-align:center; margin-top:100px; font-family:sans-serif;">
         <h1 style="color:#d9534f;">404 - Not Found</h1>
         <p>The requested file is missing or invalid.</p>
         <hr style="width:50%; border:0; border-top:1px solid #eee;">
         <small style="color:#999;">Path: {title}</small>
     </div>
-    """.format(title=title if title else "N/A")
-    
-        return HTMLResponse(content=error_html, status_code=404)
-    filename = os.path.basename(filename)
+    """
+
+
+@app.get("/VDownload/{file_id}")
+async def download_file(file_id: str, request: Request):
+    client_ip = _client_ip(request)
+    sig = request.query_params.get("sig")
+    verified = SecureLinkManager.verify(file_id, sig)
+
+    if not verified:
+        log_link_access(
+            file_id,
+            title="",
+            client_ip=client_ip,
+            success=False,
+            reason="invalid_or_expired_signature",
+        )
+        return HTMLResponse(content=_not_found_html(), status_code=404)
+
+    if not os.path.exists(verified["filename"]):
+        log_link_access(
+            file_id,
+            title=verified["title"],
+            client_ip=client_ip,
+            success=False,
+            reason="file_missing_on_disk",
+        )
+        return HTMLResponse(content=_not_found_html(verified["title"]), status_code=404)
+
+    log_link_access(
+        file_id,
+        title=verified["title"],
+        client_ip=client_ip,
+        success=True,
+    )
+    filename = os.path.basename(verified["filename"])
     return Response(
         content="",
         headers={
             "X-Accel-Redirect": f"/protected_downloads/{filename}",
-            "Content-Disposition": f"attachment; filename*=UTF-8''{title}"
-        })
+            "Content-Disposition": f"attachment; filename*=UTF-8''{verified['title']}",
+        },
+    )

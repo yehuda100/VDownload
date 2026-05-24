@@ -1,60 +1,75 @@
-import time
+"""Entry point: Telegram webhook bot, FastAPI link server, and cleanup thread."""
 import asyncio
 import logging
-import uvicorn
 import threading
-from api_server import app
-from downloader import VideoDownloader
-from bot_token import BOT_TOKEN, URL, USER_ID
+import time
+
+import uvicorn
 from telegram import BotCommand
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
-from telegram_bot import TelegramVideoBot
 
+from api_server import app as api_app
+from config import BOT_TOKEN, URL, USER_ID
+from core.telegram_bot import TelegramVideoBot
+from utils import cleanup
 
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
 )
+logging.getLogger("vdownload.audit").setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
 
+URL_MESSAGE_FILTER = (
+    filters.Chat(USER_ID)
+    & filters.TEXT
+    & ~filters.COMMAND
+    & filters.Regex(r"^https?://")
+)
 
-def run_cleanup():
+
+def run_cleanup_loop() -> None:
     while True:
         try:
-            VideoDownloader().cleanup()
-        except Exception as e:
-            logger.error(f"Error during cleanup: {e}")
+            cleanup()
+        except Exception:
+            logger.exception("Error during cleanup")
         time.sleep(3600)
 
 
-def run_bot():
+def run_bot() -> None:
     bot = TelegramVideoBot()
-    app = Application.builder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", bot.start))
-    app.add_handler(CommandHandler("mp3", bot.mp3))
-    app.add_handler(CommandHandler("mp4", bot.mp4))
-    app.add_handler(MessageHandler(filters.Chat(USER_ID) \
-                                   & filters.TEXT & ~filters.COMMAND\
-                                    &filters.Regex(r'^https?://'), bot.handle_url))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.no_entry))
+    telegram_app = Application.builder().token(BOT_TOKEN).build()
 
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(app.bot.set_my_commands([
-        BotCommand("start", "התחל"),
-        BotCommand("mp3", "הורד שיר"),
-        BotCommand("mp4", "הורד סרטון")
-    ]))
-    app.run_webhook(listen="127.0.0.1", 
-                    port=8003, 
-                    url_path=BOT_TOKEN, 
-                    webhook_url=URL + BOT_TOKEN)
+    telegram_app.add_handler(CommandHandler("start", bot.start))
+    telegram_app.add_handler(CommandHandler("mp3", bot.mp3))
+    telegram_app.add_handler(CommandHandler("mp4", bot.mp4))
+    telegram_app.add_handler(MessageHandler(URL_MESSAGE_FILTER, bot.handle_url))
+    telegram_app.add_handler(
+        MessageHandler(filters.TEXT & ~filters.COMMAND, bot.no_entry)
+    )
+
+    async def set_commands() -> None:
+        await telegram_app.bot.set_my_commands([
+            BotCommand("start", "התחל"),
+            BotCommand("mp3", "הורד שיר"),
+            BotCommand("mp4", "הורד סרטון"),
+        ])
+
+    asyncio.run(set_commands())
+    telegram_app.run_webhook(
+        listen="127.0.0.1",
+        port=8003,
+        url_path=BOT_TOKEN,
+        webhook_url=URL + BOT_TOKEN,
+    )
 
 
-def run_api():
-    uvicorn.run(app, host="127.0.0.1", port=5000)
+def run_api() -> None:
+    uvicorn.run(api_app, host="127.0.0.1", port=5000)
+
 
 if __name__ == "__main__":
     threading.Thread(target=run_api, daemon=True).start()
-    threading.Thread(target=run_cleanup, daemon=True).start()
+    threading.Thread(target=run_cleanup_loop, daemon=True).start()
     run_bot()
-

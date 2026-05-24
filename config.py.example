@@ -1,0 +1,14 @@
+# Copy to config.py and fill in your values. Do not commit config.py.
+
+BOT_TOKEN = "123456:ABC-DEF..."
+USER_ID = 123456789
+URL = "https://your-domain.com/"
+SECRET_KEY = "change-me-to-a-long-random-string"
+
+RAPIDAPI_KEY = "your-rapidapi-key"
+VDA_API_KEY = "your-vda-key"
+
+DOWNLOAD_DIR = "downloads"
+TEMP_LINKS_DIR = "temp_links"
+MAX_SIZE = 50 * 1024 * 1024  # 50 MB — Telegram upload limit
+EXPIRY = 24 * 3600  # secure link lifetime in seconds
