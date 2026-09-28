@@ -6,12 +6,14 @@ setting is missing or empty, downloads run without cookies.
 import asyncio
 import logging
 import os
+import time
 from urllib.parse import urlparse
 
 import yt_dlp
 
 import config
 from config import DOWNLOAD_DIR
+from utils import is_youtube_url
 from utils.file_utils import remove_partial_downloads
 
 from .base import BaseDownloader
@@ -30,6 +32,14 @@ _INSTAGRAM_AUTH_MARKERS = (
     "cookies-from-browser",
     "empty media response",
 )
+
+
+def configured_proxy() -> str:
+    """Return the proxy URL from config, or "" when unset or blank."""
+    raw = getattr(config, "YTDLP_PROXY", None)
+    if raw is None:
+        return ""
+    return str(raw).strip()
 
 
 def configured_cookies_path() -> str:
@@ -58,6 +68,20 @@ def _is_instagram_target(url: str, error_text: str) -> bool:
     if host.startswith("www."):
         host = host[4:]
     return host == "instagram.com" or host.endswith(".instagram.com")
+
+
+def is_youtube_transient_download_error(error: BaseException) -> bool:
+    """True for YouTube bot-check or HTTP 403 errors that often succeed on retry."""
+    text = str(error).lower()
+    if "video unavailable" in text:
+        return False
+    if "sign in to confirm" in text or "not a bot" in text:
+        return True
+    if "http error 403" in text:
+        return True
+    if "403" in text and "forbidden" in text:
+        return True
+    return False
 
 
 def is_instagram_auth_failure(url: str, error: BaseException) -> bool:
@@ -142,9 +166,12 @@ class YtDlpDownloader(BaseDownloader):
             "noplaylist": True,
         }
 
-    def build_options(self, file_id: str, format_type: str) -> dict:
+    def build_options(self, file_id: str, format_type: str, url: str = "") -> dict:
         opts = self.opts.copy()
         opts["outtmpl"] = f"{DOWNLOAD_DIR}/{file_id}.%(ext)s"
+        proxy = configured_proxy()
+        if proxy and url and is_youtube_url(url):
+            opts["proxy"] = proxy
         if format_type == "mp3":
             opts.update({
                 "format": "bestaudio/best",
@@ -177,21 +204,46 @@ class YtDlpDownloader(BaseDownloader):
         self, url: str, format_type: str, progress: ProgressReporter
     ) -> dict:
         file_id = self.generate_file_id()
-        ydl_opts = self.build_options(file_id, format_type)
+        ydl_opts = self.build_options(file_id, format_type, url)
+        max_attempts = 2 if is_youtube_url(url) else 1
 
         def run_download():
-            try:
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    return ydl.extract_info(url, download=True)
-            except yt_dlp.utils.DownloadError as e:
-                if is_instagram_auth_failure(url, e):
-                    logger.warning(
-                        "yt-dlp Instagram rate-limit or login failure: %s", e
-                    )
-                    raise ExtractionException(instagram_auth_user_message()) from e
-                raise ExtractionException(f"Failed to download video: {e}") from e
-            except Exception as e:
-                raise ExtractionException(f"Unexpected error during download: {e}") from e
+            last_error: BaseException | None = None
+            for attempt in range(max_attempts):
+                try:
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        return ydl.extract_info(url, download=True)
+                except yt_dlp.utils.DownloadError as e:
+                    last_error = e
+                    if is_instagram_auth_failure(url, e):
+                        logger.warning(
+                            "yt-dlp Instagram rate-limit or login failure: %s", e
+                        )
+                        raise ExtractionException(
+                            instagram_auth_user_message()
+                        ) from e
+                    if (
+                        attempt + 1 < max_attempts
+                        and is_youtube_transient_download_error(e)
+                    ):
+                        logger.warning(
+                            "yt-dlp YouTube transient error (retrying): %s", e
+                        )
+                        remove_partial_downloads(file_id)
+                        time.sleep(2)
+                        continue
+                    raise ExtractionException(
+                        f"Failed to download video: {e}"
+                    ) from e
+                except Exception as e:
+                    raise ExtractionException(
+                        f"Unexpected error during download: {e}"
+                    ) from e
+            if last_error is not None:
+                raise ExtractionException(
+                    f"Failed to download video: {last_error}"
+                ) from last_error
+            raise ExtractionException("Failed to download video")
 
         from core.messages import DOWNLOADING
 

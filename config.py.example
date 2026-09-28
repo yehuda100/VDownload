@@ -17,3 +17,8 @@ EXPIRY = 24 * 3600  # secure link lifetime in seconds
 # Leave "" to download without cookies. See README for how to export.
 # Never commit the cookies file.
 YTDLP_COOKIES_FILE = ""
+
+# Optional SOCKS/HTTP proxy for yt-dlp on YouTube only (e.g. Cloudflare WARP).
+# Leave "" to download YouTube without a proxy. Other sites (Instagram, etc.) ignore this.
+# YTDLP_PROXY = "socks5://127.0.0.1:40000"
+YTDLP_PROXY = ""

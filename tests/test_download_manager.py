@@ -2,8 +2,9 @@
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import yt_dlp
 
-from core.download_manager import _download_with_fallback, download
+from core.download_manager import _YOUTUBE_CHAIN, _download_with_fallback, download
 from core.download_audit import DownloadRequest
 from downloaders.exceptions import DownloaderException, APIException
 from tests.conftest import FakeProgress
@@ -83,7 +84,7 @@ class TestDownload:
         mocker.patch(
             "core.download_manager._download_with_fallback",
             new_callable=AsyncMock,
-            return_value=({"file_id": "x", "title": "Y"}, "ytstream"),
+            return_value=({"file_id": "x", "title": "Y"}, "yt-dlp"),
         )
 
         result, provider = await download(
@@ -93,8 +94,12 @@ class TestDownload:
             request_ctx,
         )
 
-        assert provider == "ytstream"
+        assert provider == "yt-dlp"
         assert result["file_id"] == "x"
+
+    def test_youtube_chain_order(self):
+        names = [name for name, _ in _YOUTUBE_CHAIN]
+        assert names == ["yt-dlp", "vda"]
 
     async def test_non_youtube_uses_yt_dlp(self, request_ctx, mocker):
         progress = FakeProgress()
@@ -118,25 +123,32 @@ class TestDownload:
         assert result["title"] == "TikTok"
         mock_dl.download.assert_awaited_once()
 
-    async def test_youtube_timeout_falls_back_to_vda(self, request_ctx, mocker):
-        """A ytstream timeout must become an APIException so VDA still runs."""
+    async def test_youtube_yt_dlp_failure_falls_back_to_vda(self, request_ctx, mocker):
+        """When yt-dlp fails on YouTube, VDA is still tried."""
         progress = FakeProgress()
 
-        class _Session:
-            async def __aenter__(self):
+        class FailingYDL:
+            def __enter__(self):
                 return self
 
-            async def __aexit__(self, *args):
-                return None
+            def __exit__(self, *args):
+                return False
 
-            def get(self, *args, **kwargs):
-                raise TimeoutError("ytstream down")
+            def extract_info(self, *args, **kwargs):
+                raise yt_dlp.utils.DownloadError("ERROR: Video unavailable")
 
         mocker.patch(
-            "downloaders.ytstream_downloader.aiohttp.ClientSession",
-            return_value=_Session(),
+            "downloaders.yt_dlp_downloader.yt_dlp.YoutubeDL",
+            return_value=FailingYDL(),
         )
-        # The YouTube chain captures get_vda_downloader at import, so patch the method.
+        mocker.patch(
+            "downloaders.yt_dlp_downloader.asyncio.to_thread",
+            side_effect=lambda fn: fn(),
+        )
+        mocker.patch(
+            "downloaders.yt_dlp_downloader.YtDlpDownloader.generate_file_id",
+            return_value="yt-id",
+        )
         mocker.patch(
             "downloaders.vda_downloader.VdaDownloader.download",
             new_callable=AsyncMock,
