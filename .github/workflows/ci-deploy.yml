@@ -1,0 +1,86 @@
+name: CI and Deploy
+
+# Pull requests targeting V2.0 run tests only.
+# Pushes to V2.0, and workflow_dispatch on V2.0, deploy after tests pass.
+on:
+  pull_request:
+    branches:
+      - V2.0
+  push:
+    branches:
+      - V2.0
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Shellcheck deploy script
+        run: |
+          if ! command -v shellcheck >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y shellcheck
+          fi
+          shellcheck scripts/deploy.sh
+
+      - name: Run pytest
+        # tests/conftest.py injects a fake config module, so this job does not
+        # create config.py and does not need repository secrets.
+        run: pytest
+
+  deploy:
+    name: deploy
+    needs: test
+    if: github.ref == 'refs/heads/V2.0' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    timeout-minutes: 30
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.DEPLOY_KEY }}
+          command_timeout: 20m
+          script: |
+            exec bash --noprofile --norc -eo pipefail <<'EOF'
+            set -euo pipefail
+            export GIT_TERMINAL_PROMPT=0
+            cd /var/www/yehuda100/bot3
+            if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
+              echo "ERROR: tracked files have local changes in /var/www/yehuda100/bot3, so the deploy stopped before updating the checkout." >&2
+              git status --porcelain --untracked-files=no >&2
+              exit 1
+            fi
+            baseline=$(git rev-parse HEAD)
+            git fetch origin V2.0
+            if ! git pull --ff-only origin V2.0; then
+              echo "ERROR: fast-forward pull of origin/V2.0 failed. The checkout was left as it is." >&2
+              exit 1
+            fi
+            bash /var/www/yehuda100/bot3/scripts/deploy.sh --baseline "$baseline"
+            EOF

@@ -13,7 +13,7 @@ A Telegram bot for downloading videos and audio from YouTube and other platforms
 - Files over Telegram’s limit → **signed download link** (nginx `X-Accel-Redirect`)
 - **Structured errors** (`DownloaderException` hierarchy) and **audit logging**
 - Hourly **cleanup** of expired links and old downloads
-- **65 unit tests** — no live API calls required
+- **Unit tests** — no live API calls required
 
 ---
 
@@ -22,6 +22,8 @@ A Telegram bot for downloading videos and audio from YouTube and other platforms
 ```
 ├── main.py                     # Entry: webhook bot, API server, cleanup thread
 ├── config.py                   # Secrets (copy from config.py.example)
+├── scripts/deploy.sh           # Production deploy (fast-forward + screen restart)
+├── .github/workflows/ci-deploy.yml
 ├── api_server.py               # GET /VDownload/{file_id}
 ├── requirements.txt
 ├── requirements-dev.txt        # pytest, pytest-asyncio, pytest-mock
@@ -148,7 +150,7 @@ cp config.py.example config.py
 # edit config.py
 
 pip install -r requirements-dev.txt
-pytest                   # optional — 65 tests
+pytest                   # optional
 
 python main.py
 ```
@@ -207,7 +209,45 @@ pip install -r requirements-dev.txt
 pytest -v
 ```
 
-Covers all three downloaders, `download_manager` fallback, secure links, and URL utils. External services are mocked.
+Covers all three downloaders, `download_manager` fallback, secure links, URL utils, and the CI/deploy workflow. External services are mocked.
+
+---
+
+## CI/CD
+
+Workflow: [`.github/workflows/ci-deploy.yml`](.github/workflows/ci-deploy.yml) (`CI and Deploy`).
+
+### Secrets
+
+Add these under **Settings → Secrets and variables → Actions**. They are the same names used by the land-page deploy, so an existing key that is already authorized on this server can be reused. Do not commit the host, the key, or any token.
+
+| Secret | Value |
+|--------|--------|
+| `SERVER_HOST` | Hostname or IP of the VPS |
+| `SERVER_USER` | `root` |
+| `DEPLOY_KEY` | Private SSH key whose public key is in `/root/.ssh/authorized_keys` on the server |
+
+### What runs when
+
+| Event | Tests | Deploy |
+|-------|-------|--------|
+| Pull request targeting `V2.0` | yes | no |
+| Push to `V2.0` (including a merge) | yes | yes, after tests pass |
+| **Run workflow** (`workflow_dispatch`) on branch `V2.0` | yes | yes, after tests pass |
+
+The test job uses Python 3.12 and `requirements-dev.txt`. `tests/conftest.py` supplies a fake `config` module, so CI does not create or read a real `config.py`.
+
+The deploy job SSHes to the server, fast-forwards `/var/www/yehuda100/bot3` to `origin/V2.0`, then runs `bash /var/www/yehuda100/bot3/scripts/deploy.sh`. That script installs `requirements.txt` with `bot3/bin/pip` when the file changed, restarts `python3 main.py` in the `Bot3` screen session, and checks that the process is still up. If tracked files have local changes, or if `V2.0` cannot fast-forward, the script exits and leaves the checkout in place (`config.py` and the `bot3/` virtualenv stay as they are, aside from `pip install` when requirements changed).
+
+### Manual deploy
+
+On GitHub: **Actions → CI and Deploy → Run workflow**, choose branch **V2.0**, then **Run workflow**.
+
+On the server, `bash /var/www/yehuda100/bot3/scripts/deploy.sh` does the same update and restart. Run that script on its own; it pulls `origin/V2.0` itself.
+
+### Branch protection
+
+Protect `V2.0` and require the status check **CI and Deploy / test** before merging. Pushes that reach `V2.0` then deploy only after that check has passed.
 
 ---
 
