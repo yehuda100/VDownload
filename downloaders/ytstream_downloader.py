@@ -1,6 +1,7 @@
 """Primary YouTube downloader: RapidAPI metadata + FFmpeg merge/copy."""
 import asyncio
 import ipaddress
+import json
 import socket
 from urllib.parse import parse_qs, urlparse
 
@@ -126,21 +127,38 @@ class YtstreamDownloader(BaseDownloader):
 
         await progress.report(DOWNLOADING)
 
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                self.base_url, headers=self.headers, params={"id": youtube_id}
-            ) as response:
-                if response.status != 200:
-                    raise APIException(response.status, await response.text())
-                data = await response.json()
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    self.base_url, headers=self.headers, params={"id": youtube_id}
+                ) as response:
+                    status = response.status
+                    if status != 200:
+                        raise APIException(status, await response.text())
+                    try:
+                        data = await response.json()
+                    except (json.JSONDecodeError, aiohttp.ContentTypeError) as exc:
+                        raise APIException(status, "Response was not JSON") from exc
+        except APIException:
+            raise
+        except TimeoutError as exc:
+            raise APIException(0, "Request timed out") from exc
+        except aiohttp.ClientError as exc:
+            raise APIException(0, type(exc).__name__) from exc
+
+        if not isinstance(data, dict):
+            raise APIException(status, "Response was not a JSON object")
 
         source_ips = default_route_source_ips()
         data, locked_ips = self._omit_foreign_locked_streams(data, source_ips)
         try:
-            if format_type == "mp3":
-                cmd = self.download_best_audio(video_id, data)
-            else:
-                cmd = self.download_best_video(video_id, data)
+            try:
+                if format_type == "mp3":
+                    cmd = self.download_best_audio(video_id, data)
+                else:
+                    cmd = self.download_best_video(video_id, data)
+            except KeyError as exc:
+                raise StreamNotFoundException("stream") from exc
         except StreamNotFoundException:
             if locked_ips:
                 raise DownloadException(

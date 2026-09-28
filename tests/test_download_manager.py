@@ -118,6 +118,41 @@ class TestDownload:
         assert result["title"] == "TikTok"
         mock_dl.download.assert_awaited_once()
 
+    async def test_youtube_timeout_falls_back_to_vda(self, request_ctx, mocker):
+        """A ytstream timeout must become an APIException so VDA still runs."""
+        progress = FakeProgress()
+
+        class _Session:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return None
+
+            def get(self, *args, **kwargs):
+                raise TimeoutError("ytstream down")
+
+        mocker.patch(
+            "downloaders.ytstream_downloader.aiohttp.ClientSession",
+            return_value=_Session(),
+        )
+        # The YouTube chain captures get_vda_downloader at import, so patch the method.
+        mocker.patch(
+            "downloaders.vda_downloader.VdaDownloader.download",
+            new_callable=AsyncMock,
+            return_value={"file_id": "vda-id", "title": "From VDA"},
+        )
+
+        result, provider = await download(
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "mp4",
+            progress,
+            request_ctx,
+        )
+
+        assert provider == "vda"
+        assert result["file_id"] == "vda-id"
+
     async def test_non_youtube_propagates_failure(self, request_ctx, mocker):
         progress = FakeProgress()
         mock_dl = MagicMock()
