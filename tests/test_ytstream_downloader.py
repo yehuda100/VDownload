@@ -2,6 +2,7 @@
 import asyncio
 import ipaddress
 import signal
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
@@ -308,10 +309,14 @@ class TestDownload:
         mock_process.wait = AsyncMock()
         mocker.patch("asyncio.create_subprocess_exec", return_value=mock_process)
 
+        partial = Path(config.DOWNLOAD_DIR) / "id.mp4"
+        partial.write_bytes(b"partial")
+
         with pytest.raises(FFmpegException, match="encode error"):
             await downloader.download(
                 "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "mp4", progress
             )
+        assert not partial.exists()
 
     async def test_ffmpeg_timeout_raises(self, downloader, progress, mocker):
         api_ctx, _ = make_aiohttp_response(json_data=YTSTREAM_API_DATA)

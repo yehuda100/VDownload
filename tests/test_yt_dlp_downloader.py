@@ -184,8 +184,16 @@ class TestDownload:
             return_value=FailingYDL(),
         )
 
+        partial = Path(config.DOWNLOAD_DIR) / "id.mp4.part"
+        partial.write_bytes(b"partial")
+        other = Path(config.DOWNLOAD_DIR) / "other.mp4"
+        other.write_bytes(b"keep")
+
         with pytest.raises(ExtractionException, match="Failed to download"):
             await downloader.download("https://example.com/v", "mp4", progress)
+
+        assert not partial.exists()
+        assert other.exists()
 
     async def test_passes_cookiefile_to_yt_dlp(
         self, downloader, progress, mocker, monkeypatch, tmp_path

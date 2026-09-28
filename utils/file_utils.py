@@ -1,10 +1,13 @@
 """File lookup under DOWNLOAD_DIR and periodic cleanup of expired artifacts."""
 import json
+import logging
 import os
 import time
 from pathlib import Path
 
 from config import DOWNLOAD_DIR, TEMP_LINKS_DIR
+
+logger = logging.getLogger(__name__)
 
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 os.makedirs(TEMP_LINKS_DIR, exist_ok=True)
@@ -16,23 +19,108 @@ KNOWN_MEDIA_EXTENSIONS = frozenset({
 })
 
 
-def cleanup() -> None:
-    """Remove expired link metadata and downloads older than 36 hours."""
-    now = time.time()
-    for filename in os.listdir(TEMP_LINKS_DIR):
-        meta_path = os.path.join(TEMP_LINKS_DIR, filename)
-        with open(meta_path, encoding="utf-8") as f:
-            meta = json.load(f)
-        if meta["expiry"] < now:
-            os.remove(meta_path)
-            file_path = meta["filename"]
-            if os.path.isfile(file_path):
-                os.remove(file_path)
+def _download_root() -> Path:
+    return Path(DOWNLOAD_DIR).resolve()
 
-    for filename in os.listdir(DOWNLOAD_DIR):
+
+def path_is_inside_download_dir(file_path: str | Path) -> bool:
+    """True when the directory entry itself lives inside DOWNLOAD_DIR.
+
+    The final path component is not resolved, so a symlink inside the download
+    directory is considered inside even if its target is not. Callers then
+    unlink the symlink rather than the outside target.
+    """
+    raw = Path(file_path)
+    if not raw.is_absolute():
+        raw = Path(DOWNLOAD_DIR) / raw
+    try:
+        parent = raw.parent.resolve()
+        parent.relative_to(_download_root())
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def remove_download_file(file_path: str | Path) -> bool:
+    """Unlink a file only when it is inside DOWNLOAD_DIR. Returns True if removed."""
+    raw = Path(file_path)
+    if not raw.is_absolute():
+        raw = Path(DOWNLOAD_DIR) / raw
+    if not path_is_inside_download_dir(raw):
+        logger.warning("Refusing to delete %s outside %s", raw, DOWNLOAD_DIR)
+        return False
+    if raw.is_dir() and not raw.is_symlink():
+        logger.warning("Refusing to delete directory %s", raw)
+        return False
+    if not raw.exists() and not raw.is_symlink():
+        return False
+    try:
+        raw.unlink()
+    except OSError:
+        logger.exception("Could not delete %s", raw)
+        return False
+    return True
+
+
+def remove_partial_downloads(file_id: str) -> None:
+    """Delete ``{DOWNLOAD_DIR}/{file_id}.*`` left behind by a failed download."""
+    if not file_id or file_id in {".", ".."}:
+        return
+    if any(sep in file_id for sep in ("/", "\\", "\x00")):
+        return
+    if any(char in file_id for char in "*?[]"):
+        return
+    directory = Path(DOWNLOAD_DIR)
+    if not directory.is_dir():
+        return
+    for path in directory.glob(f"{file_id}.*"):
+        remove_download_file(path)
+
+
+def cleanup() -> None:
+    """Remove expired link metadata and downloads older than 36 hours.
+
+    One bad metadata file does not stop the rest of the sweep. Media paths are
+    deleted only when they sit inside DOWNLOAD_DIR.
+    """
+    now = time.time()
+    try:
+        link_names = os.listdir(TEMP_LINKS_DIR)
+    except OSError:
+        logger.exception("Could not list %s", TEMP_LINKS_DIR)
+        link_names = []
+    for filename in link_names:
+        meta_path = os.path.join(TEMP_LINKS_DIR, filename)
+        try:
+            if not os.path.isfile(meta_path):
+                continue
+            with open(meta_path, encoding="utf-8") as f:
+                meta = json.load(f)
+            expiry = meta.get("expiry")
+            if not isinstance(expiry, (int, float)) or expiry >= now:
+                continue
+            file_path = meta.get("filename")
+            os.remove(meta_path)
+            if isinstance(file_path, str):
+                remove_download_file(file_path)
+        except Exception:
+            logger.exception("Skipping link metadata %s", meta_path)
+
+    try:
+        download_names = os.listdir(DOWNLOAD_DIR)
+    except OSError:
+        logger.exception("Could not list %s", DOWNLOAD_DIR)
+        download_names = []
+    for filename in download_names:
         file_path = os.path.join(DOWNLOAD_DIR, filename)
-        if os.path.isfile(file_path) and now - os.path.getmtime(file_path) > STALE_FILE_AGE_SEC:
-            os.remove(file_path)
+        try:
+            if (
+                os.path.isfile(file_path)
+                and now - os.path.getmtime(file_path) > STALE_FILE_AGE_SEC
+            ):
+                os.remove(file_path)
+        except Exception:
+            logger.exception("Skipping stale file %s", file_path)
 
 
 def sanitize_filename(title: str, *, max_length: int = MAX_FILENAME_BASE_LEN) -> str:

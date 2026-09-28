@@ -12,6 +12,7 @@ import yt_dlp
 
 import config
 from config import DOWNLOAD_DIR
+from utils.file_utils import remove_partial_downloads
 
 from .base import BaseDownloader
 from .exceptions import ExtractionException
@@ -197,6 +198,10 @@ class YtDlpDownloader(BaseDownloader):
         loop = asyncio.get_running_loop()
         ydl_opts["progress_hooks"] = [_yt_dlp_progress_hook(loop, progress)]
         await progress.report(DOWNLOADING)
-        info = await asyncio.to_thread(run_download)
+        try:
+            info = await asyncio.to_thread(run_download)
+        except Exception:
+            remove_partial_downloads(file_id)
+            raise
         title = info.get("title", "video")
         return {"file_id": file_id, "title": title}
