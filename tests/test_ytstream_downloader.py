@@ -4,6 +4,7 @@ import ipaddress
 import signal
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import aiohttp
 import pytest
 
 from downloaders.ytstream_downloader import (
@@ -154,6 +155,103 @@ class TestDownload:
     async def test_invalid_youtube_url_raises(self, downloader, progress):
         with pytest.raises(InvalidURLException):
             await downloader.download("https://example.com/not-yt", "mp4", progress)
+
+    async def test_timeout_and_client_error_are_api_exceptions(
+        self, downloader, progress, mocker
+    ):
+        class _Session:
+            def __init__(self, error):
+                self._error = error
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return None
+
+            def get(self, *args, **kwargs):
+                raise self._error
+
+        mocker.patch(
+            "downloaders.ytstream_downloader.aiohttp.ClientSession",
+            return_value=_Session(TimeoutError()),
+        )
+        with pytest.raises(APIException, match="timed out"):
+            await downloader.download(
+                "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "mp4", progress
+            )
+
+        mocker.patch(
+            "downloaders.ytstream_downloader.aiohttp.ClientSession",
+            return_value=_Session(aiohttp.ClientConnectionError("reset")),
+        )
+        with pytest.raises(APIException, match="ClientConnectionError"):
+            await downloader.download(
+                "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "mp4", progress
+            )
+
+    async def test_non_json_body_is_api_exception(self, downloader, progress, mocker):
+        import json
+
+        class _Response:
+            status = 200
+
+            async def text(self):
+                return "<html>"
+
+            async def json(self):
+                raise json.JSONDecodeError("Expecting value", "<html>", 0)
+
+        class _Get:
+            async def __aenter__(self):
+                return _Response()
+
+            async def __aexit__(self, *args):
+                return None
+
+        class _Session:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return None
+
+            def get(self, *args, **kwargs):
+                return _Get()
+
+        mocker.patch(
+            "downloaders.ytstream_downloader.aiohttp.ClientSession",
+            return_value=_Session(),
+        )
+        with pytest.raises(APIException, match="not JSON"):
+            await downloader.download(
+                "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "mp4", progress
+            )
+
+    async def test_missing_stream_url_is_stream_not_found(
+        self, downloader, progress, mocker
+    ):
+        data = {
+            "title": "Broken",
+            "adaptiveFormats": [{"itag": 140}],
+            "formats": [{"itag": 22}],
+        }
+        api_ctx, _ = make_aiohttp_response(json_data=data)
+        session_ctx, _ = make_session([api_ctx])
+        mocker.patch(
+            "downloaders.ytstream_downloader.aiohttp.ClientSession",
+            return_value=session_ctx,
+        )
+        mocker.patch(
+            "downloaders.ytstream_downloader.default_route_source_ips",
+            return_value=set(),
+        )
+        exec_mock = mocker.patch("asyncio.create_subprocess_exec")
+        with pytest.raises(StreamNotFoundException):
+            await downloader.download(
+                "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "mp4", progress
+            )
+        exec_mock.assert_not_called()
 
     async def test_api_error_raises(self, downloader, progress, mocker):
         ctx, _ = make_aiohttp_response(status=500, text="server error")
