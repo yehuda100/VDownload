@@ -347,12 +347,13 @@ class TestFileStreamTimeout:
         assert dest.read_bytes() == b"".join(chunks)
         dest.unlink()
 
-    async def test_stalled_stream_raises(self, downloader, progress, monkeypatch):
-        """A socket that stops sending fails without waiting out a long total."""
+    async def test_stalled_stream_raises(self, downloader, progress, monkeypatch, mocker):
+        """A socket that stops sending fails fast and the partial file is removed."""
         monkeypatch.setattr(
             "downloaders.vda_downloader.FILE_DOWNLOAD_TIMEOUT",
             aiohttp.ClientTimeout(total=None, sock_connect=5, sock_read=0.4),
         )
+        mocker.patch.object(downloader, "generate_file_id", return_value="stalled-id")
         app = _local_vda_app([b"partial", b"never"], stall_after_first=True)
         async with TestServer(app) as server:
             downloader.base_url = str(server.make_url("/ajax/download.php"))
@@ -365,3 +366,4 @@ class TestFileStreamTimeout:
             elapsed = monotonic() - started
 
         assert elapsed < 2.0
+        assert not (Path(DOWNLOAD_DIR) / "stalled-id.mp3").exists()

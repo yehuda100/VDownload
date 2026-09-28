@@ -5,6 +5,7 @@ from time import time
 import aiofiles
 import aiohttp
 from config import DOWNLOAD_DIR
+from utils.file_utils import remove_partial_downloads
 
 from .base import BaseDownloader
 from .exceptions import (
@@ -147,37 +148,41 @@ class VdaDownloader(BaseDownloader):
             file_id = self.generate_file_id()
             dest = f"{DOWNLOAD_DIR}/{file_id}.{ext}"
 
-            async with session.get(
-                download_url, timeout=FILE_DOWNLOAD_TIMEOUT
-            ) as response:
-                if response.status != 200:
-                    raise DownloadException(
-                        response.status, await response.text()
+            try:
+                async with session.get(
+                    download_url, timeout=FILE_DOWNLOAD_TIMEOUT
+                ) as response:
+                    if response.status != 200:
+                        raise DownloadException(
+                            response.status, await response.text()
+                        )
+                    downloaded = 0
+                    started = time()
+                    last_report = started
+                    total = getattr(response, "content_length", None)
+                    async with aiofiles.open(dest, "wb") as f:
+                        async for chunk in response.content.iter_chunked(65536):
+                            await f.write(chunk)
+                            downloaded += len(chunk)
+                            now = time()
+                            if now - last_report >= FILE_PROGRESS_INTERVAL_SEC:
+                                await _report_bytes(
+                                    progress,
+                                    format_byte_progress,
+                                    downloaded,
+                                    total,
+                                    now - started,
+                                )
+                                last_report = now
+                    await _report_bytes(
+                        progress,
+                        format_byte_progress,
+                        downloaded,
+                        total,
+                        time() - started,
                     )
-                downloaded = 0
-                started = time()
-                last_report = started
-                total = getattr(response, "content_length", None)
-                async with aiofiles.open(dest, "wb") as f:
-                    async for chunk in response.content.iter_chunked(65536):
-                        await f.write(chunk)
-                        downloaded += len(chunk)
-                        now = time()
-                        if now - last_report >= FILE_PROGRESS_INTERVAL_SEC:
-                            await _report_bytes(
-                                progress,
-                                format_byte_progress,
-                                downloaded,
-                                total,
-                                now - started,
-                            )
-                            last_report = now
-                await _report_bytes(
-                    progress,
-                    format_byte_progress,
-                    downloaded,
-                    total,
-                    time() - started,
-                )
+            except BaseException:
+                remove_partial_downloads(file_id)
+                raise
 
         return {"file_id": file_id, "title": title}
