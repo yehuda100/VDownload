@@ -14,6 +14,7 @@ from core.messages import (
     format_link_expiry,
     format_prepare_percent,
     message_for_exception,
+    send_failed_link_message,
     too_big_message,
 )
 from downloaders.exceptions import (
@@ -58,6 +59,16 @@ def test_too_big_message_includes_expiry(monkeypatch):
     assert "שלום" in text
     assert "https://example/file" in text
     assert "It expires in 24 hours." in text
+
+
+def test_send_failed_link_message_is_not_the_too_big_copy(monkeypatch):
+    monkeypatch.setattr(config, "EXPIRY", 3600)
+    text = send_failed_link_message("Clip", "https://example/file?sig=abc")
+    assert "sending it on Telegram failed" in text
+    assert "Clip" in text
+    assert "https://example/file?sig=abc" in text
+    assert "1 hour" in text
+    assert "too big" not in text.lower()
 
 
 def test_private_unavailable_unsupported_and_no_video():

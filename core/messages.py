@@ -87,6 +87,27 @@ def format_link_expiry(seconds: int) -> str:
     return f"{seconds} seconds"
 
 
+def send_failed_link_message(
+    title: str,
+    link: str,
+    expiry_seconds: int | None = None,
+) -> str:
+    """Chat text when Telegram rejected the upload but a signed link is ready."""
+    if expiry_seconds is None:
+        from config import EXPIRY
+
+        expiry_seconds = int(EXPIRY)
+    expiry = format_link_expiry(int(expiry_seconds))
+    return (
+        f"{SEND_FAILED}\n"
+        f"\n"
+        f"{title}\n"
+        f"{link}\n"
+        f"\n"
+        f"Open the link to download it. It expires in {expiry}."
+    )
+
+
 def too_big_message(
     size_bytes: int,
     title: str,

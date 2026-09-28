@@ -6,6 +6,7 @@ import time
 import uvicorn
 from telegram import BotCommand
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
+from telegram.request import HTTPXRequest
 
 from api_server import app as api_app
 from config import BOT_TOKEN, URL
@@ -16,6 +17,9 @@ from utils import cleanup
 
 configure_logging()
 logger = logging.getLogger(__name__)
+
+# Large videos need longer than PTB's 20s media write default.
+MEDIA_WRITE_TIMEOUT = 120
 
 
 def run_cleanup_loop() -> None:
@@ -47,14 +51,23 @@ def register_handlers(application: Application, bot: TelegramVideoBot) -> None:
     )
 
 
-def run_bot() -> None:
-    bot = TelegramVideoBot()
-    telegram_app = (
+def build_application() -> Application:
+    request = HTTPXRequest(
+        write_timeout=MEDIA_WRITE_TIMEOUT,
+        media_write_timeout=MEDIA_WRITE_TIMEOUT,
+    )
+    return (
         Application.builder()
         .token(BOT_TOKEN)
+        .request(request)
         .post_init(_post_init)
         .build()
     )
+
+
+def run_bot() -> None:
+    bot = TelegramVideoBot()
+    telegram_app = build_application()
     register_handlers(telegram_app, bot)
 
     telegram_app.run_webhook(
