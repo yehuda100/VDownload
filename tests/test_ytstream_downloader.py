@@ -1,5 +1,7 @@
 """Unit tests for ytstream_downloader."""
+import asyncio
 import ipaddress
+import signal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -226,7 +228,7 @@ class TestDownload:
         mock_process.communicate = AsyncMock(side_effect=TimeoutError())
         mock_process.kill = lambda: None
         mock_process.wait = AsyncMock()
-        mocker.patch("asyncio.create_subprocess_exec", return_value=mock_process)
+        created = mocker.patch("asyncio.create_subprocess_exec", return_value=mock_process)
 
         with patch(
             "downloaders.ytstream_downloader.asyncio.wait_for",
@@ -236,6 +238,34 @@ class TestDownload:
                 await downloader.download(
                     "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "mp4", progress
                 )
+        assert created.call_args.kwargs["start_new_session"] is True
+
+    async def test_ffmpeg_cancel_kills_the_process_group(self, downloader, progress, mocker):
+        api_ctx, _ = make_aiohttp_response(json_data=YTSTREAM_API_DATA)
+        session_ctx, _ = make_session([api_ctx])
+        mocker.patch(
+            "downloaders.ytstream_downloader.aiohttp.ClientSession",
+            return_value=session_ctx,
+        )
+        mocker.patch.object(downloader, "generate_file_id", return_value="id")
+
+        mock_process = AsyncMock()
+        mock_process.communicate = AsyncMock(side_effect=asyncio.CancelledError())
+        mock_process.pid = 4242
+        mock_process.wait = AsyncMock()
+        created = mocker.patch(
+            "asyncio.create_subprocess_exec", return_value=mock_process
+        )
+        killpg = mocker.patch("downloaders.ytstream_downloader.os.killpg")
+
+        with pytest.raises(asyncio.CancelledError):
+            await downloader.download(
+                "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "mp4", progress
+            )
+
+        assert created.call_args.kwargs["start_new_session"] is True
+        killpg.assert_called_once_with(4242, signal.SIGKILL)
+        mock_process.wait.assert_awaited()
 
     async def test_foreign_locked_url_skips_ffmpeg(self, downloader, progress, mocker):
         data = {

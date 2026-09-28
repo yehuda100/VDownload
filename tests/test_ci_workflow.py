@@ -110,6 +110,11 @@ def test_deploy_script_safety_contract():
     assert "screen -S Bot3 -p 0 -X stuff $'\\003'" in text
     assert "screen -dmS Bot3 bash -c 'cd /var/www/yehuda100/bot3 && source bot3/bin/activate && python3 main.py; exec bash'" in text
     assert "[0-9]{6,}:[A-Za-z0-9_-]{30,}" in text
+    assert "sig=" in text
+    assert "pkill -s" not in text
+    assert "http://127.0.0.1:8003/" in text
+    assert "http://127.0.0.1:5000/" in text
+    assert "curl -sS -o /dev/null --max-time 5" in text
     assert "git reset" not in text
     assert "git clean" not in text
     assert "--hard" not in text
@@ -239,7 +244,8 @@ def test_redact_stream_hides_telegram_tokens():
     token = "123456789:AAHabcdefghijklmnopqrstuvwxyz012345"
     script = f"""
 source "{DEPLOY}"
-printf '%s\\n' 'before {token} after' 'keep 12345:short' | redact_stream
+printf '%s\\n' 'before {token} after' 'keep 12345:short' \\
+  'https://example/VDownload/abc?sig=deadbeef&x=1' | redact_stream
 """
     result = subprocess.run(
         ["bash", "-c", script],
@@ -250,4 +256,7 @@ printf '%s\\n' 'before {token} after' 'keep 12345:short' | redact_stream
     assert token not in result.stdout
     assert "<REDACTED>" in result.stdout
     assert "keep 12345:short" in result.stdout
+    assert "sig=<REDACTED>" in result.stdout
+    assert "deadbeef" not in result.stdout
+    assert "x=1" in result.stdout
     assert result.stderr == ""
