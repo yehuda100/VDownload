@@ -12,3 +12,8 @@ DOWNLOAD_DIR = "downloads"
 TEMP_LINKS_DIR = "temp_links"
 MAX_SIZE = 50 * 1024 * 1024  # 50 MB — Telegram upload limit
 EXPIRY = 24 * 3600  # secure link lifetime in seconds
+
+# Optional Netscape cookies file for yt-dlp (Instagram rate limits / login).
+# Leave "" to download without cookies. See README for how to export.
+# Never commit the cookies file.
+YTDLP_COOKIES_FILE = ""

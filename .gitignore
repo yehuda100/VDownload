@@ -215,6 +215,12 @@ __marimo__/
 *.key
 config.py
 
+# yt-dlp Netscape cookie exports (account sessions). Never commit these.
+cookies.txt
+*cookies*.txt
+*.cookies
+cookies/
+
 # temp files
 temp_links/
 protected_downloads/

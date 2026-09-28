@@ -11,21 +11,29 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-_DOWNLOAD_DIR = tempfile.mkdtemp(prefix="vdownload_dl_")
-_LINKS_DIR = tempfile.mkdtemp(prefix="vdownload_links_")
+# tests/conftest.py is loaded both as the pytest plugin and as tests.conftest
+# (test_download_manager imports FakeProgress from it). Keep a single config
+# module so runtime lookups and import-time bindings see the same object.
+_existing_config = sys.modules.get("config")
+if getattr(_existing_config, "_vdownload_test_config", False):
+    _config = _existing_config
+else:
+    _DOWNLOAD_DIR = tempfile.mkdtemp(prefix="vdownload_dl_")
+    _LINKS_DIR = tempfile.mkdtemp(prefix="vdownload_links_")
 
-_config = types.ModuleType("config")
-_config.DOWNLOAD_DIR = _DOWNLOAD_DIR
-_config.TEMP_LINKS_DIR = _LINKS_DIR
-_config.SECRET_KEY = "test-secret-key"
-_config.URL = "https://test.example/"
-_config.EXPIRY = 3600
-_config.RAPIDAPI_KEY = "test-rapidapi-key"
-_config.VDA_API_KEY = "test-vda-key"
-_config.MAX_SIZE = 50 * 1024 * 1024
-_config.BOT_TOKEN = "000000:test-token"
-_config.USER_ID = 123456789
-sys.modules["config"] = _config
+    _config = types.ModuleType("config")
+    _config.DOWNLOAD_DIR = _DOWNLOAD_DIR
+    _config.TEMP_LINKS_DIR = _LINKS_DIR
+    _config.SECRET_KEY = "test-secret-key"
+    _config.URL = "https://test.example/"
+    _config.EXPIRY = 3600
+    _config.RAPIDAPI_KEY = "test-rapidapi-key"
+    _config.VDA_API_KEY = "test-vda-key"
+    _config.MAX_SIZE = 50 * 1024 * 1024
+    _config.BOT_TOKEN = "000000:test-token"
+    _config.USER_ID = 123456789
+    _config._vdownload_test_config = True
+    sys.modules["config"] = _config
 
 
 class FakeProgress:
