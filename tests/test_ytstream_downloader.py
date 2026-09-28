@@ -188,8 +188,9 @@ class TestDownload:
 
         assert result["file_id"] == "stream-id"
         assert result["title"] == "Test Video"
-        assert "Getting video info from ytstream" in progress.messages[0]
-        assert progress.messages[-1] == "Download complete."
+        assert progress.messages[0] == "Downloading..."
+        assert progress.messages[-1] == "Downloading..."
+        assert all("ytstream" not in m.lower() for m in progress.messages)
 
     async def test_ffmpeg_failure_raises(self, downloader, progress, mocker):
         api_ctx, _ = make_aiohttp_response(json_data=YTSTREAM_API_DATA)

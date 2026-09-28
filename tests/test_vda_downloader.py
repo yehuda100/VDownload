@@ -73,8 +73,10 @@ class TestDownload:
         assert result == {"file_id": "vda-file-id", "title": "VDA Title"}
         mock_file.write.assert_any_call(b"video")
         mock_file.write.assert_any_call(b"data")
-        assert any("Getting link data from VDA" in m for m in progress.messages)
-        assert progress.messages[-1] == "Download complete."
+        assert progress.messages[0] == "Downloading..."
+        assert "Preparing the file... 50%" in progress.messages
+        assert "Download complete." not in progress.messages
+        assert all("VDA" not in m for m in progress.messages)
 
     async def test_uses_secondary_api_when_primary_fails(
         self, downloader, progress, mocker
@@ -113,7 +115,8 @@ class TestDownload:
         )
 
         assert result["title"] == "Secondary"
-        assert any("secondary API" in m for m in progress.messages)
+        assert progress.messages[0] == "Downloading..."
+        assert all("API" not in m and "secondary" not in m.lower() for m in progress.messages)
 
     async def test_progress_does_not_display_regression(
         self, downloader, progress, mocker
@@ -143,8 +146,35 @@ class TestDownload:
             "https://www.youtube.com/watch?v=abc", "mp4", progress
         )
 
-        pct_messages = [m for m in progress.messages if m.startswith("Processing")]
-        assert pct_messages == ["Processing... 50.0%"]
+        pct_messages = [m for m in progress.messages if m.startswith("Preparing")]
+        assert pct_messages == ["Preparing the file... 50%"]
+
+    async def test_file_download_reports_size(self, downloader, progress, mocker):
+        init_ctx = _init_response()
+        done_ctx, _ = make_aiohttp_response(
+            json_data={"success": 1, "download_url": "https://vda.example/f.mp4"}
+        )
+        payload = b"x" * (2 * 1024 * 1024)
+        file_ctx, file_resp = make_aiohttp_response(chunks=[payload])
+        file_resp.content_length = len(payload)
+
+        session_ctx, _ = make_session([init_ctx, done_ctx, file_ctx])
+        mocker.patch(
+            "downloaders.vda_downloader.aiohttp.ClientSession",
+            return_value=session_ctx,
+        )
+        mocker.patch.object(downloader, "generate_file_id", return_value="fid")
+        mocker.patch("aiofiles.open", return_value=AsyncMock(
+            __aenter__=AsyncMock(return_value=AsyncMock(write=AsyncMock())),
+            __aexit__=AsyncMock(return_value=None),
+        ))
+        mocker.patch("asyncio.sleep", new_callable=AsyncMock)
+
+        await downloader.download(
+            "https://www.youtube.com/watch?v=abc", "mp4", progress
+        )
+
+        assert any("Downloading... 2.0 / 2.0 MB" in m for m in progress.messages)
 
     async def test_stall_raises(self, downloader, progress, mocker):
         init_ctx = _init_response()

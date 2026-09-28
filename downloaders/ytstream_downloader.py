@@ -122,12 +122,14 @@ class YtstreamDownloader(BaseDownloader):
         if not youtube_id:
             raise InvalidURLException("YouTube URL")
         video_id = self.generate_file_id()
+        from core.messages import DOWNLOADING
+
+        await progress.report(DOWNLOADING)
 
         async with aiohttp.ClientSession() as session:
             async with session.get(
                 self.base_url, headers=self.headers, params={"id": youtube_id}
             ) as response:
-                await progress.report("Getting video info from ytstream...")
                 if response.status != 200:
                     raise APIException(response.status, await response.text())
                 data = await response.json()
@@ -146,7 +148,6 @@ class YtstreamDownloader(BaseDownloader):
                 ) from None
             raise
 
-        await progress.report("Downloading and processing with FFmpeg...")
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
@@ -165,7 +166,6 @@ class YtstreamDownloader(BaseDownloader):
             raise FFmpegException(stderr.decode(errors="replace"))
 
         title = data.get("title", "video")
-        await progress.report("Download complete.")
         return {"file_id": video_id, "title": title}
 
     def _omit_foreign_locked_streams(

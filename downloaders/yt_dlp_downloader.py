@@ -67,6 +67,48 @@ def is_instagram_auth_failure(url: str, error: BaseException) -> bool:
     return any(marker in text for marker in _INSTAGRAM_AUTH_MARKERS)
 
 
+def _schedule_progress(progress: ProgressReporter, text: str) -> None:
+    try:
+        asyncio.create_task(progress.report(text))
+    except RuntimeError:
+        logger.debug("No running loop for yt-dlp progress", exc_info=True)
+
+
+def _yt_dlp_progress_hook(loop: asyncio.AbstractEventLoop, progress: ProgressReporter):
+    """Coalesce worker-thread progress callbacks onto the bot loop."""
+    from core.messages import format_byte_progress
+
+    pending: dict[str, object] = {"text": None, "scheduled": False}
+
+    def hook(data: dict) -> None:
+        if data.get("status") != "downloading":
+            return
+        text = format_byte_progress(
+            data.get("downloaded_bytes") or 0,
+            data.get("total_bytes") or data.get("total_bytes_estimate"),
+            data.get("speed"),
+        )
+        if not text:
+            return
+        pending["text"] = text
+        if pending["scheduled"]:
+            return
+        pending["scheduled"] = True
+
+        def flush() -> None:
+            pending["scheduled"] = False
+            latest = pending["text"]
+            if isinstance(latest, str):
+                _schedule_progress(progress, latest)
+
+        try:
+            loop.call_soon_threadsafe(flush)
+        except RuntimeError:
+            pending["scheduled"] = False
+
+    return hook
+
+
 def instagram_auth_user_message() -> str:
     """Short Telegram message. Export steps live in the README."""
     path = configured_cookies_path()
@@ -150,8 +192,11 @@ class YtDlpDownloader(BaseDownloader):
             except Exception as e:
                 raise ExtractionException(f"Unexpected error during download: {e}") from e
 
-        await progress.report("Starting download...")
+        from core.messages import DOWNLOADING
+
+        loop = asyncio.get_running_loop()
+        ydl_opts["progress_hooks"] = [_yt_dlp_progress_hook(loop, progress)]
+        await progress.report(DOWNLOADING)
         info = await asyncio.to_thread(run_download)
         title = info.get("title", "video")
-        await progress.report("Download complete.")
         return {"file_id": file_id, "title": title}

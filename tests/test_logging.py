@@ -316,3 +316,7 @@ class TestAuditCallers:
         assert "error=TimeoutError" in caplog.text
         assert "error= |" not in caplog.text
         status.update.assert_awaited()
+        shown = status.update.await_args.args[0]
+        assert shown == "❌ Something went wrong. Send the link again in a little while."
+        assert "TimeoutError" not in shown
+        assert "Download failed" not in shown
