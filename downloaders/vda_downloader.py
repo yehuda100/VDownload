@@ -1,5 +1,8 @@
 """Fallback YouTube downloader via VDA API (poll progress, then stream file)."""
 import asyncio
+import json
+import logging
+import os
 from time import time
 
 import aiofiles
@@ -18,6 +21,8 @@ from .exceptions import (
 )
 from .progress import ProgressReporter
 
+logger = logging.getLogger(__name__)
+
 POLL_TIMEOUT_SEC = 600
 STALL_TIMEOUT_SEC = 30
 FILE_PROGRESS_INTERVAL_SEC = 1.5
@@ -32,6 +37,41 @@ FILE_DOWNLOAD_TIMEOUT = aiohttp.ClientTimeout(
     sock_connect=FILE_SOCK_CONNECT_TIMEOUT_SEC,
     sock_read=FILE_SOCK_READ_TIMEOUT_SEC,
 )
+
+
+def _unlink_partial(path: str) -> None:
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        return
+    except OSError:
+        logger.exception("Could not remove partial download %s", path)
+
+
+async def _load_provider_payload(session, url: str, params: dict) -> tuple[int, str, dict | None]:
+    """Fetch one VDA init response.
+
+    Status is checked before the body is parsed. A non-200 or non-JSON body
+    returns ``None`` so the caller can try the other host. Timeouts and
+    connection errors are reported the same way instead of escaping as
+    ``ClientError`` / ``TimeoutError``.
+    """
+    try:
+        async with session.get(url, params=params) as response:
+            status = response.status
+            if status != 200:
+                return status, await response.text(), None
+            try:
+                data = await response.json()
+            except (json.JSONDecodeError, aiohttp.ContentTypeError):
+                return status, "Response was not JSON", None
+    except TimeoutError:
+        return 0, "Request timed out", None
+    except aiohttp.ClientError as exc:
+        return 0, type(exc).__name__, None
+    if not isinstance(data, dict):
+        return status, "Response was not a JSON object", None
+    return status, "", data
 
 
 async def _report_bytes(progress, formatter, downloaded: int, total, elapsed: float) -> None:
@@ -65,20 +105,19 @@ class VdaDownloader(BaseDownloader):
         await progress.report(DOWNLOADING)
 
         async with aiohttp.ClientSession() as session:
-            async with session.get(self.base_url, params=params) as response:
-                response_data = await response.json()
-                if response.status != 200 or not response_data.get("progress_url"):
-                    async with session.get(
-                        self.secondary_url, params=params
-                    ) as secondary_response:
-                        response_data = await secondary_response.json()
-                        if secondary_response.status != 200 or not response_data.get(
-                            "progress_url"
-                        ):
-                            raise APIException(
-                                secondary_response.status,
-                                await secondary_response.text(),
-                            )
+            response_data = None
+            last_status = 0
+            last_detail = ""
+            for endpoint in (self.base_url, self.secondary_url):
+                status, detail, payload = await _load_provider_payload(
+                    session, endpoint, params
+                )
+                last_status, last_detail = status, detail
+                if payload and payload.get("progress_url"):
+                    response_data = payload
+                    break
+            if response_data is None:
+                raise APIException(last_status, last_detail or "Progress URL not available")
 
             progress_url = response_data.get("progress_url")
             if not progress_url:
@@ -181,6 +220,12 @@ class VdaDownloader(BaseDownloader):
                         total,
                         time() - started,
                     )
+            except TimeoutError as exc:
+                _unlink_partial(dest)
+                remove_partial_downloads(file_id)
+                raise ProgressStalledException(
+                    timeout=FILE_SOCK_READ_TIMEOUT_SEC
+                ) from exc
             except BaseException:
                 remove_partial_downloads(file_id)
                 raise

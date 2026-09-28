@@ -1,5 +1,6 @@
 """Unit tests for vda_downloader."""
 import asyncio
+import json
 from pathlib import Path
 from time import monotonic
 from unittest.mock import AsyncMock, patch
@@ -117,6 +118,70 @@ class TestDownload:
         assert result["title"] == "Secondary"
         assert progress.messages[0] == "Downloading..."
         assert all("API" not in m and "secondary" not in m.lower() for m in progress.messages)
+
+    async def test_non_json_primary_tries_secondary(
+        self, downloader, progress, mocker
+    ):
+        """A primary HTML/error body must not skip the secondary host."""
+
+        class _Body:
+            def __init__(self, status, payload=None, text="", fail_json=False):
+                self.status = status
+                self._payload = payload
+                self._text = text
+                self._fail_json = fail_json
+
+            async def text(self):
+                return self._text
+
+            async def json(self):
+                if self._fail_json:
+                    raise json.JSONDecodeError("Expecting value", self._text, 0)
+                return self._payload
+
+        class _Ctx:
+            def __init__(self, body):
+                self._body = body
+
+            async def __aenter__(self):
+                return self._body
+
+            async def __aexit__(self, *args):
+                return None
+
+        primary = _Ctx(_Body(500, text="<html>down</html>", fail_json=True))
+        secondary, _ = make_aiohttp_response(
+            json_data={
+                "progress_url": "https://vda.example/progress/2",
+                "title": "Secondary",
+            }
+        )
+        done, _ = make_aiohttp_response(
+            json_data={"success": 1, "download_url": "https://vda.example/f.mp4"}
+        )
+        file_ctx, _ = make_aiohttp_response(chunks=[b"x"])
+        session_ctx, session = make_session([primary, secondary, done, file_ctx])
+        mocker.patch(
+            "downloaders.vda_downloader.aiohttp.ClientSession",
+            return_value=session_ctx,
+        )
+        mocker.patch.object(downloader, "generate_file_id", return_value="fid")
+        mocker.patch(
+            "aiofiles.open",
+            return_value=AsyncMock(
+                __aenter__=AsyncMock(return_value=AsyncMock(write=AsyncMock())),
+                __aexit__=AsyncMock(return_value=None),
+            ),
+        )
+        mocker.patch("asyncio.sleep", new_callable=AsyncMock)
+
+        result = await downloader.download(
+            "https://www.youtube.com/watch?v=abc", "mp4", progress
+        )
+
+        assert result["title"] == "Secondary"
+        assert session._calls[0][0] == downloader.base_url
+        assert session._calls[1][0] == downloader.secondary_url
 
     async def test_progress_does_not_display_regression(
         self, downloader, progress, mocker
@@ -348,7 +413,7 @@ class TestFileStreamTimeout:
         dest.unlink()
 
     async def test_stalled_stream_raises(self, downloader, progress, monkeypatch, mocker):
-        """A socket that stops sending fails fast and the partial file is removed."""
+        """A socket that stops sending fails as a stall and leaves no partial file."""
         monkeypatch.setattr(
             "downloaders.vda_downloader.FILE_DOWNLOAD_TIMEOUT",
             aiohttp.ClientTimeout(total=None, sock_connect=5, sock_read=0.4),
@@ -359,7 +424,7 @@ class TestFileStreamTimeout:
             downloader.base_url = str(server.make_url("/ajax/download.php"))
             downloader.secondary_url = str(server.make_url("/unused"))
             started = monotonic()
-            with pytest.raises(aiohttp.ServerTimeoutError):
+            with pytest.raises(ProgressStalledException):
                 await downloader.download(
                     "https://www.youtube.com/watch?v=abc", "mp3", progress
                 )
