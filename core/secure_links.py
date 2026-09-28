@@ -6,6 +6,7 @@ import hmac
 import json
 import os
 import re
+import tempfile
 import time
 
 from config import EXPIRY, SECRET_KEY, TEMP_LINKS_DIR, URL
@@ -49,17 +50,25 @@ class SecureLinkManager:
             "expiry": expiry,
             "signature": sig,
         }
-        fd = os.open(meta_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        os.makedirs(TEMP_LINKS_DIR, exist_ok=True)
+        fd, tmp_path = tempfile.mkstemp(
+            prefix=".link-", suffix=".tmp", dir=TEMP_LINKS_DIR
+        )
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                fd = -1
                 json.dump(payload, handle)
                 handle.flush()
                 os.fsync(handle.fileno())
-        finally:
-            if fd >= 0:
-                os.close(fd)
-        os.chmod(meta_path, 0o600)
+            # mkstemp is 0600 before umask; chmod again so the replaced inode
+            # stays owner-only even if an older metadata file had a wider mode.
+            os.chmod(tmp_path, 0o600)
+            os.replace(tmp_path, meta_path)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
         return f"{URL}VDownload/{file_id}?sig={sig}"
 
     @staticmethod

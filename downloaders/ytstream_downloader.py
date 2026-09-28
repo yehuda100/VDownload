@@ -8,6 +8,7 @@ from urllib.parse import parse_qs, urlparse
 import aiohttp
 from config import DOWNLOAD_DIR
 from utils import extract_youtube_id
+from utils.file_utils import remove_partial_downloads
 
 from .base import BaseDownloader
 from .exceptions import (
@@ -166,22 +167,26 @@ class YtstreamDownloader(BaseDownloader):
                 ) from None
             raise
 
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
         try:
-            _stdout, stderr = await asyncio.wait_for(
-                process.communicate(), timeout=FFMPEG_TIMEOUT_SEC
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
-        except asyncio.TimeoutError:
-            process.kill()
-            await process.wait()
-            raise FFmpegException("FFmpeg timed out") from None
+            try:
+                _stdout, stderr = await asyncio.wait_for(
+                    process.communicate(), timeout=FFMPEG_TIMEOUT_SEC
+                )
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.wait()
+                raise FFmpegException("FFmpeg timed out") from None
 
-        if process.returncode != 0:
-            raise FFmpegException(stderr.decode(errors="replace"))
+            if process.returncode != 0:
+                raise FFmpegException(stderr.decode(errors="replace"))
+        except BaseException:
+            remove_partial_downloads(video_id)
+            raise
 
         title = data.get("title", "video")
         return {"file_id": video_id, "title": title}

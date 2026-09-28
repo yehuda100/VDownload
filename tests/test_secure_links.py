@@ -4,6 +4,7 @@ import hmac
 import json
 import time
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -90,6 +91,22 @@ class TestSecureLinkManager:
 
         assert SecureLinkManager.verify(FILE_ID, sig) is None
         assert meta.exists()
+
+    def test_save_replaces_atomically_and_keeps_previous_on_failure(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr("core.secure_links.TEMP_LINKS_DIR", str(tmp_path))
+        SecureLinkManager.save_metadata(OTHER_ID, "/x.mp4", "T")
+        original = (tmp_path / f"{OTHER_ID}.json").read_text(encoding="utf-8")
+        assert json.loads(original)["title"] == "T"
+        assert list(tmp_path.glob("*.tmp")) == []
+
+        with patch("core.secure_links.json.dump", side_effect=OSError("disk full")):
+            with pytest.raises(OSError, match="disk full"):
+                SecureLinkManager.save_metadata(OTHER_ID, "/x.mp4", "T2")
+
+        assert (tmp_path / f"{OTHER_ID}.json").read_text(encoding="utf-8") == original
+        assert list(tmp_path.glob("*.tmp")) == []
 
     def test_legacy_signature_still_verifies(self, tmp_path, monkeypatch):
         monkeypatch.setattr("core.secure_links.TEMP_LINKS_DIR", str(tmp_path))

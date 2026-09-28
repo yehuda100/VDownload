@@ -8,6 +8,7 @@ from time import time
 import aiofiles
 import aiohttp
 from config import DOWNLOAD_DIR
+from utils.file_utils import remove_partial_downloads
 
 from .base import BaseDownloader
 from .exceptions import (
@@ -221,8 +222,12 @@ class VdaDownloader(BaseDownloader):
                     )
             except TimeoutError as exc:
                 _unlink_partial(dest)
+                remove_partial_downloads(file_id)
                 raise ProgressStalledException(
                     timeout=FILE_SOCK_READ_TIMEOUT_SEC
                 ) from exc
+            except BaseException:
+                remove_partial_downloads(file_id)
+                raise
 
         return {"file_id": file_id, "title": title}
