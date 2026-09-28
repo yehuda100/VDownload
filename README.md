@@ -13,7 +13,7 @@ A Telegram bot for downloading videos and audio from YouTube and other platforms
 - Files over Telegram’s limit → **signed download link** (nginx `X-Accel-Redirect`)
 - **Structured errors** (`DownloaderException` hierarchy) and **audit logging**
 - Hourly **cleanup** of expired links and old downloads
-- **44 unit tests** — no live API calls required
+- **65 unit tests** — no live API calls required
 
 ---
 
@@ -93,6 +93,49 @@ cp config.py.example config.py
 | `TEMP_LINKS_DIR` | Signed-link metadata JSON |
 | `MAX_SIZE` | Max bytes sent via Telegram (~50MB) |
 | `EXPIRY` | Link lifetime in seconds (default 24h) |
+| `YTDLP_COOKIES_FILE` | Optional Netscape cookies file for yt-dlp. Leave `""` to download without cookies |
+
+---
+
+## Instagram cookies (optional)
+
+Instagram often answers the server with `HTTP Error 429: Too Many Requests` or `rate-limit reached or login required`. yt-dlp can send a logged-in browser session when `YTDLP_COOKIES_FILE` points at a **Netscape** cookies file. Leave the setting as `""` (or omit it in an older `config.py`) and every download runs without cookies, same as before.
+
+The file is passed on every yt-dlp download (Instagram, Facebook, TikTok, and others). The cookie jar only sends cookies that match the request domain, so an Instagram-only file does not log other sites in.
+
+### Export a cookies file
+
+On a computer where you can log into Instagram (the server itself does not need a browser):
+
+1. Install the browser extension **[Get cookies.txt LOCALLY](https://github.com/kairi003/Get-cookies.txt-LOCALLY)** (Chrome, Firefox, or Edge). It writes a Netscape cookies file on your machine. Avoid extensions that upload cookies to a third-party site.
+2. Log in at [instagram.com](https://www.instagram.com/). A spare account is safer than your personal one, because the bot will use that session.
+3. Open the extension on the Instagram tab and export. Save the file as `cookies.txt`. The first line is `# Netscape HTTP Cookie File`.
+4. Copy it to the server, outside git, for example `/var/lib/vdownload/instagram-cookies.txt`.
+5. Restrict permissions: `chmod 600 /var/lib/vdownload/instagram-cookies.txt`.
+
+The same export can be done with yt-dlp on that computer, after you are logged into Instagram in Chrome:
+
+```bash
+yt-dlp --cookies-from-browser chrome --cookies cookies.txt --skip-download "https://www.instagram.com/"
+```
+
+Then upload `cookies.txt` to the server. `--cookies-from-browser` only works where that browser profile exists; the bot itself only reads the file via `--cookies`.
+
+### Configure
+
+In `config.py` (this file is gitignored):
+
+```python
+YTDLP_COOKIES_FILE = "/var/lib/vdownload/instagram-cookies.txt"
+```
+
+Restart the bot after changing `config.py`. yt-dlp reads the file on each download, so replacing the file at the same path is picked up on the next request.
+
+Cookies expire. When Instagram rejects the session again, export a fresh file and replace the one on the server.
+
+If a download still fails, the Telegram status message says which case it is: cookies were not configured, the path does not exist, or the file was sent and Instagram still rejected it.
+
+`cookies.txt`, `*cookies*.txt`, `*.cookies`, and the `cookies/` directory are gitignored. Do not commit the file or paste it into chat.
 
 ---
 
@@ -105,7 +148,7 @@ cp config.py.example config.py
 # edit config.py
 
 pip install -r requirements-dev.txt
-pytest                   # optional — 44 tests
+pytest                   # optional — 65 tests
 
 python main.py
 ```

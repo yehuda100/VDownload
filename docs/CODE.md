@@ -51,7 +51,7 @@ Returns: `{"file_id": str, "title": str}`.
 |-------|----------|-----------|
 | `YtstreamDownloader` | YouTube (primary) | RapidAPI + FFmpeg (async subprocess) |
 | `VdaDownloader` | YouTube (fallback) | External API + polling + `aiofiles` download |
-| `YtDlpDownloader` | Generic | `yt-dlp` via `asyncio.to_thread` |
+| `YtDlpDownloader` | Generic | `yt-dlp` via `asyncio.to_thread`. Optional Netscape cookies from `YTDLP_COOKIES_FILE` (`cookiefile`). Missing or blank setting means no cookies |
 
 All inherit `BaseDownloader` and report progress through `ProgressReporter.report()`.
 
@@ -99,6 +99,8 @@ DownloaderException          ← base for all download failures
 1. **In downloaders** — on failure, `raise` the appropriate type (errors are not swallowed).
 2. **In `download_manager`** — strategy fails → `logger.warning` + try next; all fail → `logger.error` + re-raise last error.
 3. **In `telegram_bot`** — `DownloaderException` → user message + `logger.warning`; anything else → generic user message + `logger.exception` (with traceback).
+
+Instagram `HTTP 429`, `rate-limit reached or login required`, and the empty-media login error are rewritten before they reach Telegram. The chat message tells the owner to export a Netscape cookies file and set `YTDLP_COOKIES_FILE` (or to refresh the file when one is already configured). The raw yt-dlp text is logged at `WARNING` on `downloaders.yt_dlp_downloader`. Other yt-dlp failures keep the original `Failed to download video: ...` message.
 
 Minor Telegram errors (edit/delete status message) use `logger.debug` only and do not abort the download.
 
@@ -152,7 +154,7 @@ pytest
 
 | File | Coverage |
 |------|----------|
-| `tests/test_yt_dlp_downloader.py` | `build_options`, success, `ExtractionException` |
+| `tests/test_yt_dlp_downloader.py` | `build_options`, optional `cookiefile`, success, `ExtractionException`, Instagram rate-limit/login messages |
 | `tests/test_ytstream_downloader.py` | stream selection, API/FFmpeg errors, full `download()` |
 | `tests/test_vda_downloader.py` | polling, secondary API, progress UI, stall, file fetch |
 | `tests/test_download_manager.py` | fallback chain, YouTube vs generic routing |
