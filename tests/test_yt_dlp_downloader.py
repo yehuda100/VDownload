@@ -13,6 +13,7 @@ from downloaders.yt_dlp_downloader import (
     YtDlpDownloader,
     instagram_auth_user_message,
     is_instagram_auth_failure,
+    is_youtube_transient_download_error,
 )
 from downloaders.exceptions import ExtractionException
 import config
@@ -83,6 +84,37 @@ class TestBuildOptions:
             opts = downloader.build_options("abc-123", "mp4")
         assert "cookiefile" not in opts
         assert missing in caplog.text
+
+    def test_proxy_omitted_when_unset(self, downloader, monkeypatch):
+        monkeypatch.delattr(config, "YTDLP_PROXY", raising=False)
+        opts = downloader.build_options(
+            "abc-123", "mp4", "https://www.youtube.com/watch?v=abc"
+        )
+        assert "proxy" not in opts
+
+    def test_proxy_omitted_for_non_youtube(self, downloader, monkeypatch):
+        monkeypatch.setattr(
+            config,
+            "YTDLP_PROXY",
+            "socks5://127.0.0.1:40000",
+            raising=False,
+        )
+        opts = downloader.build_options(
+            "abc-123", "mp4", "https://www.instagram.com/reel/abc/"
+        )
+        assert "proxy" not in opts
+
+    def test_proxy_set_for_youtube_when_configured(self, downloader, monkeypatch):
+        monkeypatch.setattr(
+            config,
+            "YTDLP_PROXY",
+            "socks5://127.0.0.1:40000",
+            raising=False,
+        )
+        opts = downloader.build_options(
+            "abc-123", "mp4", "https://youtu.be/abc123"
+        )
+        assert opts["proxy"] == "socks5://127.0.0.1:40000"
 
 
 class TestDownload:
@@ -232,6 +264,98 @@ class TestDownload:
         )
         assert result["title"] == "Reel"
         assert captured["opts"]["cookiefile"] == os.path.abspath(cookies)
+
+    async def test_youtube_bot_check_retries_once_then_succeeds(
+        self, downloader, progress, mocker
+    ):
+        mocker.patch.object(downloader, "generate_file_id", return_value="yt-id")
+        calls = {"n": 0}
+        sleep_mock = mocker.patch("downloaders.yt_dlp_downloader.time.sleep")
+
+        class RetryYDL:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def extract_info(self, *args, **kwargs):
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    raise yt_dlp.utils.DownloadError(
+                        "Sign in to confirm you're not a bot"
+                    )
+                return {"title": "Recovered"}
+
+        mocker.patch(
+            "downloaders.yt_dlp_downloader.yt_dlp.YoutubeDL",
+            return_value=RetryYDL(),
+        )
+        mocker.patch(
+            "downloaders.yt_dlp_downloader.asyncio.to_thread",
+            side_effect=lambda fn: fn(),
+        )
+        partial = Path(config.DOWNLOAD_DIR) / "yt-id.mp4.part"
+        partial.write_bytes(b"partial")
+
+        result = await downloader.download(
+            "https://www.youtube.com/watch?v=abc", "mp4", progress
+        )
+
+        assert result == {"file_id": "yt-id", "title": "Recovered"}
+        assert calls["n"] == 2
+        sleep_mock.assert_called_once_with(2)
+        assert not partial.exists()
+
+    async def test_youtube_video_unavailable_does_not_retry(
+        self, downloader, progress, mocker
+    ):
+        mocker.patch.object(downloader, "generate_file_id", return_value="yt-id")
+        calls = {"n": 0}
+        sleep_mock = mocker.patch("downloaders.yt_dlp_downloader.time.sleep")
+
+        class FailingYDL:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def extract_info(self, *args, **kwargs):
+                calls["n"] += 1
+                raise yt_dlp.utils.DownloadError("ERROR: Video unavailable")
+
+        mocker.patch(
+            "downloaders.yt_dlp_downloader.yt_dlp.YoutubeDL",
+            return_value=FailingYDL(),
+        )
+        mocker.patch(
+            "downloaders.yt_dlp_downloader.asyncio.to_thread",
+            side_effect=lambda fn: fn(),
+        )
+
+        with pytest.raises(ExtractionException, match="Video unavailable"):
+            await downloader.download(
+                "https://www.youtube.com/watch?v=abc", "mp4", progress
+            )
+
+        assert calls["n"] == 1
+        sleep_mock.assert_not_called()
+
+
+class TestYoutubeTransientErrors:
+    def test_detects_bot_check_and_403(self):
+        assert is_youtube_transient_download_error(
+            yt_dlp.utils.DownloadError("Sign in to confirm you're not a bot")
+        )
+        assert is_youtube_transient_download_error(
+            yt_dlp.utils.DownloadError("HTTP Error 403: Forbidden")
+        )
+
+    def test_ignores_video_unavailable(self):
+        assert not is_youtube_transient_download_error(
+            yt_dlp.utils.DownloadError("ERROR: Video unavailable")
+        )
 
 
 class TestInstagramAuthMessage:

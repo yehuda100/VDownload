@@ -1,7 +1,7 @@
 """
 Download orchestration: platform detection and provider fallback chain.
 
-YouTube: ytstream -> VDA. Other URLs: yt-dlp only.
+YouTube: yt-dlp -> VDA. Other URLs: yt-dlp only.
 """
 from collections.abc import Callable
 
@@ -50,7 +50,7 @@ def get_yt_dlp_downloader() -> YtDlpDownloader:
 
 
 _YOUTUBE_CHAIN: tuple[tuple[str, Callable[[], BaseDownloader]], ...] = (
-    ("ytstream", get_ytstream_downloader),
+    ("yt-dlp", get_yt_dlp_downloader),
     ("vda", get_vda_downloader),
 )
 
