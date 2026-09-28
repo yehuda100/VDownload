@@ -19,6 +19,17 @@ from .progress import ProgressReporter
 
 POLL_TIMEOUT_SEC = 600
 STALL_TIMEOUT_SEC = 30
+# aiohttp's default ClientTimeout(total=300) covers the whole response body.
+# A file that is still streaming past five minutes raises TimeoutError from
+# iter_chunked. No total cap: the transfer may run as long as bytes arrive.
+# sock_read fails the GET only when the peer stops sending.
+FILE_SOCK_CONNECT_TIMEOUT_SEC = 30
+FILE_SOCK_READ_TIMEOUT_SEC = 60
+FILE_DOWNLOAD_TIMEOUT = aiohttp.ClientTimeout(
+    total=None,
+    sock_connect=FILE_SOCK_CONNECT_TIMEOUT_SEC,
+    sock_read=FILE_SOCK_READ_TIMEOUT_SEC,
+)
 
 
 class VdaDownloader(BaseDownloader):
@@ -130,7 +141,9 @@ class VdaDownloader(BaseDownloader):
             file_id = self.generate_file_id()
             dest = f"{DOWNLOAD_DIR}/{file_id}.{ext}"
 
-            async with session.get(download_url) as response:
+            async with session.get(
+                download_url, timeout=FILE_DOWNLOAD_TIMEOUT
+            ) as response:
                 await progress.report("Downloading file...")
                 if response.status != 200:
                     raise DownloadException(
