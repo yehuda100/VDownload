@@ -139,7 +139,13 @@ DOWNLOAD_OK   | ... | provider=vda | delivery=telegram
 | `DEBUG` | Status message edit/delete failed | `status_updater` |
 | `ERROR` | Background cleanup failure | `main.py` |
 
-Default: `logging.INFO` in `main.py`. For verbose diagnostics: `logging.DEBUG`.
+Default: `logging.INFO` in `main.py` (`configure_logging`). For verbose diagnostics: `logging.DEBUG`.
+
+### Token redaction
+
+`httpx` logs each Telegram call at INFO with the full URL (`/bot<token>/method`). `configure_logging()` raises `httpx` and `httpcore` to WARNING so those request lines are not emitted. WARNING and ERROR from those loggers still pass. A redacting filter on the application handler (and on the `httpx` logger) replaces bot tokens, including inside tracebacks, with `<REDACTED>`.
+
+Audit `error=` fields use `format_error()`: the exception text, or the exception type name when that text is empty (`TimeoutError`).
 
 ---
 
@@ -158,6 +164,7 @@ pytest
 | `tests/test_download_manager.py` | fallback chain, YouTube vs generic routing |
 | `tests/test_secure_links.py` | HMAC save/verify/expiry |
 | `tests/test_url_utils.py` | URL parsing helpers |
+| `tests/test_logging.py` | Token redaction and non-empty audit errors |
 
 External APIs, FFmpeg, and Telegram are **mocked** — no network required.
 
