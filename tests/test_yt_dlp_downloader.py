@@ -1,4 +1,5 @@
 """Unit tests for yt_dlp_downloader."""
+import asyncio
 import logging
 import os
 import subprocess
@@ -110,11 +111,54 @@ class TestDownload:
         )
 
         assert result == {"file_id": "fixed-id", "title": "My Video"}
-        assert progress.messages[0] == "Starting download..."
-        assert progress.messages[-1] == "Download complete."
+        assert progress.messages[0] == "Downloading..."
+        assert "Download complete." not in progress.messages
         mock_ydl.extract_info.assert_called_once_with(
             "https://tiktok.com/x", download=True
         )
+
+    async def test_progress_hook_reports_size_and_speed(
+        self, downloader, progress, mocker
+    ):
+        mocker.patch.object(downloader, "generate_file_id", return_value="fixed-id")
+        captured = {}
+
+        class RecordingYDL:
+            def __init__(self, opts):
+                captured["opts"] = opts
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def extract_info(self, *args, **kwargs):
+                captured["opts"]["progress_hooks"][0]({
+                    "status": "downloading",
+                    "downloaded_bytes": 13_002_342,
+                    "total_bytes": 31_457_280,
+                    "speed": 1_258_291,
+                })
+                captured["opts"]["progress_hooks"][0]({"status": "finished"})
+                return {"title": "My Video"}
+
+        mocker.patch(
+            "downloaders.yt_dlp_downloader.yt_dlp.YoutubeDL",
+            RecordingYDL,
+        )
+        mocker.patch(
+            "downloaders.yt_dlp_downloader.asyncio.to_thread",
+            side_effect=lambda fn: fn(),
+        )
+
+        await downloader.download("https://tiktok.com/x", "mp4", progress)
+        for _ in range(5):
+            await asyncio.sleep(0)
+            if any("MB/s" in m for m in progress.messages):
+                break
+
+        assert "Downloading... 12.4 / 30.0 MB · 1.2 MB/s" in progress.messages
 
     async def test_download_error_raises_extraction_exception(
         self, downloader, progress, mocker

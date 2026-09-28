@@ -19,6 +19,7 @@ from .progress import ProgressReporter
 
 POLL_TIMEOUT_SEC = 600
 STALL_TIMEOUT_SEC = 30
+FILE_PROGRESS_INTERVAL_SEC = 1.5
 # aiohttp's default ClientTimeout(total=300) covers the whole response body.
 # A file that is still streaming past five minutes raises TimeoutError from
 # iter_chunked. No total cap: the transfer may run as long as bytes arrive.
@@ -30,6 +31,13 @@ FILE_DOWNLOAD_TIMEOUT = aiohttp.ClientTimeout(
     sock_connect=FILE_SOCK_CONNECT_TIMEOUT_SEC,
     sock_read=FILE_SOCK_READ_TIMEOUT_SEC,
 )
+
+
+async def _report_bytes(progress, formatter, downloaded: int, total, elapsed: float) -> None:
+    speed = downloaded / elapsed if elapsed > 0 else None
+    text = formatter(downloaded, total, speed)
+    if text:
+        await progress.report(text)
 
 
 class VdaDownloader(BaseDownloader):
@@ -51,18 +59,17 @@ class VdaDownloader(BaseDownloader):
 
         ext = "mp3" if format_type == "mp3" else "mp4"
         deadline = time() + POLL_TIMEOUT_SEC
+        from core.messages import DOWNLOADING, format_byte_progress, format_prepare_percent
+
+        await progress.report(DOWNLOADING)
 
         async with aiohttp.ClientSession() as session:
             async with session.get(self.base_url, params=params) as response:
-                await progress.report("Getting link data from VDA...")
                 response_data = await response.json()
                 if response.status != 200 or not response_data.get("progress_url"):
                     async with session.get(
                         self.secondary_url, params=params
                     ) as secondary_response:
-                        await progress.report(
-                            "Primary API failed, trying secondary API..."
-                        )
                         response_data = await secondary_response.json()
                         if secondary_response.status != 200 or not response_data.get(
                             "progress_url"
@@ -97,7 +104,6 @@ class VdaDownloader(BaseDownloader):
                     progress_data = await progress_response.json()
 
                     if progress_data.get("success", 0) == 1:
-                        await progress.report("Download ready.")
                         download_url = progress_data.get("download_url")
                         if not download_url:
                             raise DownloadURLNotFoundException()
@@ -108,7 +114,7 @@ class VdaDownloader(BaseDownloader):
 
                     if new_progress >= 1000:
                         if display_progress < 1000:
-                            await progress.report("Processing... 100%")
+                            await progress.report(format_prepare_percent(100))
                             display_progress = 1000
                         last_change_time = time()
                     elif new_progress >= 0:
@@ -116,7 +122,7 @@ class VdaDownloader(BaseDownloader):
                             display_progress = new_progress
                             last_change_time = time()
                             pct = min(100.0, new_progress / 10.0)
-                            await progress.report(f"Processing... {pct:.1f}%")
+                            await progress.report(format_prepare_percent(pct))
                         elif new_progress < display_progress:
                             # Server reset progress for a new phase — keep UI, reset stall clock
                             last_change_time = time()
@@ -144,14 +150,34 @@ class VdaDownloader(BaseDownloader):
             async with session.get(
                 download_url, timeout=FILE_DOWNLOAD_TIMEOUT
             ) as response:
-                await progress.report("Downloading file...")
                 if response.status != 200:
                     raise DownloadException(
                         response.status, await response.text()
                     )
+                downloaded = 0
+                started = time()
+                last_report = started
+                total = getattr(response, "content_length", None)
                 async with aiofiles.open(dest, "wb") as f:
                     async for chunk in response.content.iter_chunked(65536):
                         await f.write(chunk)
+                        downloaded += len(chunk)
+                        now = time()
+                        if now - last_report >= FILE_PROGRESS_INTERVAL_SEC:
+                            await _report_bytes(
+                                progress,
+                                format_byte_progress,
+                                downloaded,
+                                total,
+                                now - started,
+                            )
+                            last_report = now
+                await _report_bytes(
+                    progress,
+                    format_byte_progress,
+                    downloaded,
+                    total,
+                    time() - started,
+                )
 
-        await progress.report("Download complete.")
         return {"file_id": file_id, "title": title}

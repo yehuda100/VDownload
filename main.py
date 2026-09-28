@@ -8,20 +8,14 @@ from telegram import BotCommand
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
 from api_server import app as api_app
-from config import BOT_TOKEN, URL, USER_ID
+from config import BOT_TOKEN, URL
 from core.logging_config import configure_logging
-from core.telegram_bot import TelegramVideoBot
+from core.messages import MENU_MP3, MENU_MP4, MENU_START
+from core.telegram_bot import URL_MESSAGE_FILTER, TelegramVideoBot
 from utils import cleanup
 
 configure_logging()
 logger = logging.getLogger(__name__)
-
-URL_MESSAGE_FILTER = (
-    filters.Chat(USER_ID)
-    & filters.TEXT
-    & ~filters.COMMAND
-    & filters.Regex(r"^https?://")
-)
 
 
 def run_cleanup_loop() -> None:
@@ -35,10 +29,22 @@ def run_cleanup_loop() -> None:
 
 async def _post_init(application: Application) -> None:
     await application.bot.set_my_commands([
-        BotCommand("start", "Start the bot"),
-        BotCommand("mp3", "Download audio (MP3)"),
-        BotCommand("mp4", "Download video (MP4)"),
+        BotCommand("start", MENU_START),
+        BotCommand("mp3", MENU_MP3),
+        BotCommand("mp4", MENU_MP4),
     ])
+
+
+def register_handlers(application: Application, bot: TelegramVideoBot) -> None:
+    application.add_handler(CommandHandler("start", bot.start))
+    application.add_handler(CommandHandler("mp3", bot.mp3))
+    application.add_handler(CommandHandler("mp4", bot.mp4))
+    application.add_handler(
+        MessageHandler(URL_MESSAGE_FILTER, bot.handle_url, block=False)
+    )
+    application.add_handler(
+        MessageHandler(filters.TEXT & ~filters.COMMAND, bot.no_entry)
+    )
 
 
 def run_bot() -> None:
@@ -49,14 +55,7 @@ def run_bot() -> None:
         .post_init(_post_init)
         .build()
     )
-
-    telegram_app.add_handler(CommandHandler("start", bot.start))
-    telegram_app.add_handler(CommandHandler("mp3", bot.mp3))
-    telegram_app.add_handler(CommandHandler("mp4", bot.mp4))
-    telegram_app.add_handler(MessageHandler(URL_MESSAGE_FILTER, bot.handle_url))
-    telegram_app.add_handler(
-        MessageHandler(filters.TEXT & ~filters.COMMAND, bot.no_entry)
-    )
+    register_handlers(telegram_app, bot)
 
     telegram_app.run_webhook(
         listen="127.0.0.1",
