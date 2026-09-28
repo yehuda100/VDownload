@@ -136,7 +136,11 @@ The status text says which case it is: no cookies configured, the path does not 
 
 ## YouTube proxy (Cloudflare WARP)
 
-Optional. YouTube often answers a datacenter IP with a bot check. Run WARP on the server in **proxy-only** mode and point yt-dlp at it:
+Optional. A datacenter IP often gets a YouTube bot check. WARP in **proxy-only** mode can help, but its exit addresses are shared, and YouTube bot-checks those too. It may work for a while and then start failing. Reconnecting for a new IP often does not clear it.
+
+When yt-dlp fails, the bot retries once and then uses VDA. YouTube still downloads, only slower.
+
+The most reliable way to stay on yt-dlp is a Netscape cookies file from a secondary (throwaway) Google account, set as `YTDLP_COOKIES_FILE`. That account may get flagged. Export it the same way as the Instagram cookies above. One file is enough for both.
 
 ```bash
 warp-cli registration new
@@ -151,7 +155,7 @@ Then in `config.py`:
 YTDLP_PROXY = "socks5://127.0.0.1:40000"
 ```
 
-Restart the bot. The proxy is applied only when the URL is YouTube. Instagram and other sites stay direct. One bot-check or 403 retry still happens before VDA.
+Restart the bot. The proxy applies only to YouTube URLs. Other sites stay direct.
 
 **Do not use full-tunnel mode on a server.** `warp-cli mode warp` sends all of the machine's traffic through Cloudflare, including SSH and the webhook, and can lock you out. Proxy mode only listens on the local SOCKS port.
 
@@ -248,9 +252,9 @@ They live under **Settings → Secrets and variables → Actions**. Do not commi
 
 ### YouTube bot check
 
-yt-dlp says `Sign in to confirm you're not a bot`, or the download dies with HTTP 403. The YouTube attempt already retries once. If both attempts fail, the bot falls through to VDA on its own.
+yt-dlp says `Sign in to confirm you're not a bot`, or the download dies with HTTP 403. The bot retries once, then falls back to VDA, so the video still arrives, only slower. `Video unavailable` skips the retry.
 
-To make yt-dlp succeed from the server, set `YTDLP_PROXY` to a local WARP SOCKS proxy (`socks5://127.0.0.1:40000`) as in the WARP section, and keep WARP in proxy mode. `Video unavailable` skips the retry; the proxy cannot fetch a video that has been removed.
+A local WARP SOCKS proxy (`YTDLP_PROXY`, for example `socks5://127.0.0.1:40000`, proxy mode only) can help. WARP's shared IPs are often bot-checked as well, and a fresh exit IP often does not fix it. The most reliable yt-dlp option is `YTDLP_COOKIES_FILE` from a secondary (throwaway) Google account. That account may get flagged.
 
 ### Instagram 429 and cookies
 
