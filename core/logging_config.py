@@ -4,15 +4,25 @@ Application logging setup.
 httpx logs every Telegram API call at INFO with the full request URL, and that
 URL contains the bot token (``/bot<token>/<method>``). Those lines are silenced
 by raising the httpx/httpcore level to WARNING. Warnings and errors are kept,
-and a filter redacts the token wherever it still shows up (including tracebacks).
+and a filter redacts the token and secure-link ``sig=`` values wherever they
+still show up (including tracebacks). Rotating file logs go to ``logs/bot.log``
+(override with ``LOG_DIR`` in config).
 """
 from __future__ import annotations
 
 import logging
 import re
 import sys
+from logging.handlers import TimedRotatingFileHandler
+from pathlib import Path
 
 _LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+_FILE_HANDLER_ATTR = "_vdownload_file_handler"
+_LOG_BASENAME = "bot.log"
+
+# Secure download links append ``?sig=<hmac>``; never persist the signature.
+_SIG_QUERY_RE = re.compile(r"sig=[^&\s\"']+", re.IGNORECASE)
 
 # Bot API tokens are ``<numeric id>:<secret>``. The secret is 35 chars from
 # this alphabet; allow 30+ so slightly different lengths are still covered.
@@ -47,13 +57,14 @@ def _configured_tokens() -> tuple[str, ...]:
 
 
 def redact_telegram_token(text: str) -> str:
-    """Replace Telegram bot tokens in ``text`` with ``<REDACTED>``."""
+    """Replace Telegram bot tokens and link signatures in ``text`` with ``<REDACTED>``."""
     if not text:
         return text
     for secret in _configured_tokens():
         if secret in text:
             text = text.replace(secret, _REDACTED)
-    return _TELEGRAM_BOT_TOKEN_RE.sub(_REDACTED, text)
+    text = _TELEGRAM_BOT_TOKEN_RE.sub(_REDACTED, text)
+    return _SIG_QUERY_RE.sub("sig=<REDACTED>", text)
 
 
 def redact_log_record(record: logging.LogRecord) -> None:
@@ -122,6 +133,46 @@ def _attach_filter(target: logging.Logger | logging.Handler) -> None:
     target.addFilter(TelegramTokenRedactingFilter())
 
 
+def _config_module():
+    return sys.modules.get("config")
+
+
+def _file_logging_enabled() -> bool:
+    """Skip rotating file logs during tests unless a test opts in."""
+    config = _config_module()
+    if config is not None and getattr(config, "_vdownload_test_config", False):
+        return bool(getattr(config, "ENABLE_FILE_LOGGING", False))
+    return True
+
+
+def resolve_log_dir() -> Path:
+    """Directory for ``bot.log`` (created by ``configure_logging`` when file logging runs)."""
+    config = _config_module()
+    log_dir = getattr(config, "LOG_DIR", None) if config is not None else None
+    if log_dir is None:
+        return _PROJECT_ROOT / "logs"
+    return Path(log_dir)
+
+
+def _has_file_handler(handlers: list[logging.Handler]) -> bool:
+    return any(getattr(handler, _FILE_HANDLER_ATTR, False) for handler in handlers)
+
+
+def _add_file_handler(root: logging.Logger) -> None:
+    log_dir = resolve_log_dir()
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / _LOG_BASENAME
+    file_handler = TimedRotatingFileHandler(
+        log_path,
+        when="midnight",
+        backupCount=30,
+        encoding="utf-8",
+    )
+    setattr(file_handler, _FILE_HANDLER_ATTR, True)
+    file_handler.setFormatter(RedactingFormatter(_LOG_FORMAT))
+    root.addHandler(file_handler)
+
+
 def configure_logging() -> None:
     """Install the process log handler, quiet HTTP client chatter, redact tokens."""
     root = logging.getLogger()
@@ -131,6 +182,9 @@ def configure_logging() -> None:
         handler = logging.StreamHandler()
         handler.setFormatter(RedactingFormatter(_LOG_FORMAT))
         root.addHandler(handler)
+
+    if _file_logging_enabled() and not _has_file_handler(root.handlers):
+        _add_file_handler(root)
 
     for handler in root.handlers:
         _attach_filter(handler)

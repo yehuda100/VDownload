@@ -19,6 +19,7 @@ from core.logging_config import (
     TelegramTokenRedactingFilter,
     configure_logging,
     redact_telegram_token,
+    resolve_log_dir,
 )
 from core.telegram_bot import TelegramVideoBot
 from downloaders.exceptions import APIException, DownloaderException
@@ -90,6 +91,13 @@ class TestRedactTelegramToken:
         assert _TOKEN not in redacted
         assert other not in redacted
         assert redacted.count("<REDACTED>") == 2
+
+    def test_redacts_sig_query_parameter(self):
+        link = "https://example/VDownload/abc?sig=deadbeefcafebabe"
+        redacted = redact_telegram_token(link)
+        assert "deadbeefcafebabe" not in redacted
+        assert "sig=<REDACTED>" in redacted
+        assert redact_telegram_token("sig=SECRET&other=1") == "sig=<REDACTED>&other=1"
 
 
 class TestRedactingFilter:
@@ -226,6 +234,102 @@ class TestConfigureLogging:
         assert "Failed to send file, token=<REDACTED>" in text
         assert "TimeoutError" in text
         assert "Unexpected error while downloading" in text
+
+
+class TestFileLogging:
+    def _restore_root(self, saved):
+        root = logging.getLogger()
+        root.handlers[:] = saved["handlers"]
+        root.setLevel(saved["level"])
+
+    def test_file_handler_writes_under_log_dir(self, tmp_path, monkeypatch):
+        import config
+
+        log_dir = tmp_path / "persisted"
+        monkeypatch.setattr(config, "LOG_DIR", str(log_dir), raising=False)
+        monkeypatch.setattr(config, "ENABLE_FILE_LOGGING", True, raising=False)
+
+        root = logging.getLogger()
+        saved = {"handlers": root.handlers[:], "level": root.level}
+        root.handlers.clear()
+        try:
+            configure_logging()
+            file_handlers = [
+                h
+                for h in root.handlers
+                if getattr(h, "_vdownload_file_handler", False)
+            ]
+            assert len(file_handlers) == 1
+            handler = file_handlers[0]
+            assert handler.backupCount == 30
+            assert handler.encoding == "utf-8"
+            assert resolve_log_dir() == log_dir
+            assert (log_dir / "bot.log").exists()
+
+            logging.getLogger("test.file.log").info("persisted line")
+            handler.flush()
+            contents = (log_dir / "bot.log").read_text(encoding="utf-8")
+            assert "persisted line" in contents
+            assert _TOKEN not in contents
+        finally:
+            for h in root.handlers:
+                h.close()
+            self._restore_root(saved)
+
+    def test_creates_missing_log_dir(self, tmp_path, monkeypatch):
+        import config
+
+        log_dir = tmp_path / "nested" / "logs"
+        assert not log_dir.exists()
+        monkeypatch.setattr(config, "LOG_DIR", str(log_dir), raising=False)
+        monkeypatch.setattr(config, "ENABLE_FILE_LOGGING", True, raising=False)
+
+        root = logging.getLogger()
+        saved = {"handlers": root.handlers[:], "level": root.level}
+        root.handlers.clear()
+        try:
+            configure_logging()
+            assert log_dir.is_dir()
+            assert (log_dir / "bot.log").exists()
+        finally:
+            for h in root.handlers:
+                h.close()
+            self._restore_root(saved)
+
+    def test_file_output_redacts_sig_and_token(self, tmp_path, monkeypatch):
+        import config
+
+        log_dir = tmp_path / "redact"
+        monkeypatch.setattr(config, "LOG_DIR", str(log_dir), raising=False)
+        monkeypatch.setattr(config, "ENABLE_FILE_LOGGING", True, raising=False)
+
+        root = logging.getLogger()
+        saved = {"handlers": root.handlers[:], "level": root.level}
+        root.handlers.clear()
+        try:
+            configure_logging()
+            file_handlers = [
+                h
+                for h in root.handlers
+                if getattr(h, "_vdownload_file_handler", False)
+            ]
+            handler = file_handlers[0]
+            secret_sig = "a" * 32
+            logging.getLogger("test.file.redact").info(
+                "link https://example/VDownload/x?sig=%s token=%s",
+                secret_sig,
+                BOT_TOKEN,
+            )
+            handler.flush()
+            contents = (log_dir / "bot.log").read_text(encoding="utf-8")
+            assert secret_sig not in contents
+            assert BOT_TOKEN not in contents
+            assert "sig=<REDACTED>" in contents
+            assert "token=<REDACTED>" in contents
+        finally:
+            for h in root.handlers:
+                h.close()
+            self._restore_root(saved)
 
 
 class TestFormatError:
