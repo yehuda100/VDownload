@@ -167,6 +167,7 @@ pytest
 | `tests/test_secure_links.py` | HMAC save/verify/expiry |
 | `tests/test_url_utils.py` | URL parsing helpers |
 | `tests/test_logging.py` | Token redaction and non-empty audit errors |
+| `tests/test_ci_workflow.py` | CI workflow triggers, deploy gated to `V2.0` push/dispatch, deploy script safety |
 
 External APIs, FFmpeg, and Telegram are **mocked** — no network required.
 

@@ -215,6 +215,12 @@ __marimo__/
 *.key
 config.py
 
+# Production virtualenv on the VPS (python is bot3/bin/python). Never commit it.
+/bot3/
+
+# Blob id of requirements.txt last installed into that virtualenv by scripts/deploy.sh.
+.requirements-installed-blob
+
 # yt-dlp Netscape cookie exports (account sessions). Never commit these.
 cookies.txt
 *cookies*.txt
