@@ -33,6 +33,7 @@ from core.messages import (
     UNEXPECTED,
     WAITING_FOR_PREVIOUS,
     message_for_exception,
+    send_failed_link_message,
     too_big_message,
 )
 from downloaders.exceptions import DownloaderException
@@ -176,7 +177,29 @@ class TelegramVideoBot:
             except Exception as e:
                 log_download_failed(request, e, stage="telegram_send")
                 logger.exception("Failed to send file to Telegram: %s", filepath)
-                await status_updater.update(SEND_FAILED, flush=True, fallback=True)
+                try:
+                    link = SecureLinkManager.save_metadata(
+                        result["file_id"], filepath, display_name
+                    )
+                except Exception as link_error:
+                    log_download_failed(request, link_error, stage="secure_link")
+                    logger.exception(
+                        "Failed to save a fallback download link for %s", filepath
+                    )
+                    await status_updater.update(SEND_FAILED, flush=True, fallback=True)
+                    return
+                await status_updater.update(
+                    send_failed_link_message(result["title"], link),
+                    flush=True,
+                    fallback=True,
+                )
+                log_download_success(
+                    request,
+                    provider=provider,
+                    delivery="secure_link",
+                    file_id=result["file_id"],
+                    title=result["title"],
+                )
                 return
 
             await self._cleanup_after_send(update.message, filepath)

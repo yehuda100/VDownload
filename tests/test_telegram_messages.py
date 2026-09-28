@@ -249,6 +249,65 @@ async def test_cleanup_failure_is_not_a_send_failure():
     assert status.deleted is True
 
 
+async def test_send_failure_edits_status_with_a_signed_link():
+    bot = TelegramVideoBot()
+    update, context = _update("https://youtu.be/abcdefghijk")
+
+    async def download(url, format_type, status, request):
+        return {
+            "file_id": "66666666-6666-4666-8666-666666666666",
+            "title": "Clip",
+        }, "yt-dlp"
+
+    _RecordingStatus.created = []
+    with (
+        patch("core.telegram_bot.StatusUpdater", _RecordingStatus),
+        patch("core.telegram_bot.download", download),
+        patch("core.telegram_bot.find_file", return_value=_file(100)),
+        patch.object(bot, "_send_file", AsyncMock(side_effect=RuntimeError("timeout"))),
+        patch(
+            "core.telegram_bot.SecureLinkManager.save_metadata",
+            return_value="https://example/file?sig=abc",
+        ) as save_metadata,
+    ):
+        await bot.handle_url(update, context)
+
+    status = _RecordingStatus.created[0]
+    text = status.updates[-1]
+    assert SEND_FAILED in text
+    assert "https://example/file?sig=abc" in text
+    assert "Clip" in text
+    assert "too big" not in text.lower()
+    assert status.deleted is False
+    save_metadata.assert_called_once()
+
+
+async def test_send_failure_without_a_link_keeps_the_plain_error():
+    bot = TelegramVideoBot()
+    update, context = _update("https://youtu.be/abcdefghijk")
+
+    async def download(url, format_type, status, request):
+        return {
+            "file_id": "66666666-6666-4666-8666-666666666666",
+            "title": "Clip",
+        }, "yt-dlp"
+
+    _RecordingStatus.created = []
+    with (
+        patch("core.telegram_bot.StatusUpdater", _RecordingStatus),
+        patch("core.telegram_bot.download", download),
+        patch("core.telegram_bot.find_file", return_value=_file(100)),
+        patch.object(bot, "_send_file", AsyncMock(side_effect=RuntimeError("timeout"))),
+        patch(
+            "core.telegram_bot.SecureLinkManager.save_metadata",
+            side_effect=OSError("disk full"),
+        ),
+    ):
+        await bot.handle_url(update, context)
+
+    assert _RecordingStatus.created[0].updates[-1] == SEND_FAILED
+
+
 async def test_second_link_waits_for_the_first():
     bot = TelegramVideoBot()
     release = asyncio.Event()
