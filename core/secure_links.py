@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import json
 import os
+import tempfile
 import time
 
 from config import EXPIRY, SECRET_KEY, TEMP_LINKS_DIR, URL
@@ -17,17 +18,29 @@ class SecureLinkManager:
         data = f"{title}:{file_id}:{expiry}"
         sig = hmac.new(SECRET_KEY.encode(), data.encode(), hashlib.sha256).hexdigest()
         meta_path = os.path.join(TEMP_LINKS_DIR, f"{file_id}.json")
-        with open(meta_path, "w", encoding="utf-8") as f:
-            json.dump(
-                {
-                    "file_id": file_id,
-                    "filename": filepath,
-                    "title": title,
-                    "expiry": expiry,
-                    "signature": sig,
-                },
-                f,
-            )
+        payload = {
+            "file_id": file_id,
+            "filename": filepath,
+            "title": title,
+            "expiry": expiry,
+            "signature": sig,
+        }
+        os.makedirs(TEMP_LINKS_DIR, exist_ok=True)
+        fd, tmp_path = tempfile.mkstemp(
+            prefix=".link-", suffix=".tmp", dir=TEMP_LINKS_DIR
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(payload, f)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, meta_path)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
         return f"{URL}VDownload/{file_id}?sig={sig}"
 
     @staticmethod
