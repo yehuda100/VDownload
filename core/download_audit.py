@@ -10,6 +10,18 @@ from typing import Any
 logger = logging.getLogger("vdownload.audit")
 
 
+def format_error(error: BaseException) -> str:
+    """Return audit text for an exception.
+
+    Some exceptions (notably ``TimeoutError``) stringify to an empty string.
+    Fall back to the type name so ``error=`` is never blank.
+    """
+    message = str(error).strip()
+    if message:
+        return message
+    return type(error).__name__
+
+
 @dataclass(frozen=True)
 class DownloadRequest:
     """Who initiated a download (Telegram user)."""
@@ -56,12 +68,13 @@ def log_provider_failed(
     *,
     next_provider: str | None = None,
 ) -> None:
+    rendered = format_error(error)
     if next_provider:
         logger.warning(
             "PROVIDER_FAIL | %s | provider=%s | error=%s | next=%s",
             req.label(),
             provider,
-            error,
+            rendered,
             next_provider,
         )
     else:
@@ -69,7 +82,7 @@ def log_provider_failed(
             "PROVIDER_FAIL | %s | provider=%s | error=%s | next=none",
             req.label(),
             provider,
-            error,
+            rendered,
         )
 
 
@@ -107,7 +120,7 @@ def log_download_failed(req: DownloadRequest, error: BaseException, *, stage: st
         "DOWNLOAD_FAIL | %s | stage=%s | error=%s | url=%s",
         req.label(),
         stage,
-        error,
+        format_error(error),
         req.url,
     )
 

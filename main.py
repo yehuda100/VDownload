@@ -9,14 +9,11 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
 from api_server import app as api_app
 from config import BOT_TOKEN, URL, USER_ID
+from core.logging_config import configure_logging
 from core.telegram_bot import TelegramVideoBot
 from utils import cleanup
 
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO,
-)
-logging.getLogger("vdownload.audit").setLevel(logging.INFO)
+configure_logging()
 logger = logging.getLogger(__name__)
 
 URL_MESSAGE_FILTER = (

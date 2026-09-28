@@ -13,7 +13,7 @@ A Telegram bot for downloading videos and audio from YouTube and other platforms
 - Files over Telegram’s limit → **signed download link** (nginx `X-Accel-Redirect`)
 - **Structured errors** (`DownloaderException` hierarchy) and **audit logging**
 - Hourly **cleanup** of expired links and old downloads
-- **44 unit tests** — no live API calls required
+- **65 unit tests** — no live API calls required
 
 ---
 
