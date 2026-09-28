@@ -46,7 +46,10 @@ git_blob() {
 
 redact_stream() {
   # Telegram bot tokens look like 123456789:AAH... (id of 6+ digits, secret of 30+).
-  sed -E 's/[0-9]{6,}:[A-Za-z0-9_-]{30,}/<REDACTED>/g'
+  # Signed download links put the HMAC in sig=.
+  sed -E \
+    -e 's/[0-9]{6,}:[A-Za-z0-9_-]{30,}/<REDACTED>/g' \
+    -e 's/(sig=)[^&[:space:]]+/\1<REDACTED>/g'
 }
 
 assert_deployable_worktree() {
@@ -118,6 +121,62 @@ wait_for_exit() {
   done
 }
 
+# Fields after the comm ')' in /proc/pid/stat: state ppid pgrp ...
+_proc_stat_fields() {
+  local pid=$1
+  sed -n 's/.*) //p' "/proc/${pid}/stat" 2>/dev/null || true
+}
+
+# Descendant PIDs of $1, children after their own descendants. Does not print $1.
+_descendant_pids() {
+  local parent=$1
+  local proc pid ppid
+  local -a children=()
+  for proc in /proc/[0-9]*; do
+    [[ -d "$proc" ]] || continue
+    pid=${proc#/proc/}
+    ppid=$(_proc_stat_fields "$pid" | awk '{print $2}')
+    [[ "$ppid" == "$parent" ]] || continue
+    children+=("$pid")
+  done
+  if ((${#children[@]})); then
+    local child
+    for child in "${children[@]}"; do
+      _descendant_pids "$child"
+      printf '%s\n' "$child"
+    done
+  fi
+}
+
+# Kill one process. A group signal is used only when this pid is the group
+# leader (pgrp == pid), which is true for ffmpeg started in its own session.
+# The bot's python often shares the screen shell's group, so a group kill
+# there would stop the shell that restarts the bot.
+_signal_one() {
+  local sig=$1
+  local pid=$2
+  local fields pgrp
+  fields=$(_proc_stat_fields "$pid")
+  pgrp=$(awk '{print $3}' <<<"$fields")
+  if [[ -n "$pgrp" && "$pgrp" == "$pid" ]]; then
+    echo "Sending SIG${sig} to process group ${pid}"
+    kill -s "$sig" -- "-${pid}" 2>/dev/null || kill -s "$sig" "$pid" 2>/dev/null || true
+  else
+    echo "Sending SIG${sig} to ${pid}"
+    kill -s "$sig" "$pid" 2>/dev/null || true
+  fi
+}
+
+_signal_process_tree() {
+  local sig=$1
+  local root=$2
+  local pid
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] || continue
+    _signal_one "$sig" "$pid"
+  done < <(_descendant_pids "$root"; printf '%s\n' "$root")
+}
+
 signal_matching_bots() {
   local sig=$1
   local pid
@@ -125,13 +184,7 @@ signal_matching_bots() {
   while IFS= read -r pid; do
     [[ -n "$pid" ]] || continue
     found=1
-    echo "Sending SIG${sig} to ${pid}"
-    if command -v pkill >/dev/null 2>&1; then
-      pkill -s "$sig" -P "$pid" 2>/dev/null || true
-    fi
-    if ! kill -s "$sig" "$pid" 2>/dev/null; then
-      echo "Process ${pid} was already gone."
-    fi
+    _signal_process_tree "$sig" "$pid"
   done < <(bot_pids)
   (( found == 1 ))
 }
@@ -187,6 +240,18 @@ health_check() {
   pids=$(bot_pids)
   if [[ -z "$pids" ]]; then
     echo "ERROR: python3 main.py is not running with cwd ${REPO_DIR}." >&2
+    dump_screen
+    exit 1
+  fi
+  # No -f: the webhook and API both answer 404 on "/", and that still means
+  # the port accepted the connection.
+  if ! curl -sS -o /dev/null --max-time 5 http://127.0.0.1:8003/; then
+    echo "ERROR: nothing is accepting connections on 127.0.0.1:8003." >&2
+    dump_screen
+    exit 1
+  fi
+  if ! curl -sS -o /dev/null --max-time 5 http://127.0.0.1:5000/; then
+    echo "ERROR: nothing is accepting connections on 127.0.0.1:5000." >&2
     dump_screen
     exit 1
   fi
@@ -256,6 +321,7 @@ main() {
   [[ -d /proc ]] || die "Linux /proc is required to identify the bot process"
   command -v git >/dev/null 2>&1 || die "git is not installed"
   command -v screen >/dev/null 2>&1 || die "screen is not installed"
+  command -v curl >/dev/null 2>&1 || die "curl is not installed"
 
   if [[ -n "$baseline" ]]; then
     old_head=$(git rev-parse --verify "${baseline}^{commit}") || die "baseline ${baseline} is not a commit"

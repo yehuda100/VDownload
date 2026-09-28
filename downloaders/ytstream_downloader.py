@@ -2,6 +2,8 @@
 import asyncio
 import ipaddress
 import json
+import os
+import signal
 import socket
 from urllib.parse import parse_qs, urlparse
 
@@ -21,6 +23,28 @@ from .exceptions import (
 from .progress import ProgressReporter
 
 FFMPEG_TIMEOUT_SEC = 600
+
+
+async def _stop_ffmpeg(process: asyncio.subprocess.Process) -> None:
+    """Kill ffmpeg and its session. start_new_session makes the pid the pgid."""
+    pid = getattr(process, "pid", None)
+    if isinstance(pid, int) and pid > 0:
+        try:
+            os.killpg(pid, signal.SIGKILL)
+        except (OSError, ProcessLookupError, TypeError):
+            try:
+                process.kill()
+            except (OSError, ProcessLookupError, TypeError):
+                pass
+    else:
+        try:
+            process.kill()
+        except (OSError, ProcessLookupError, TypeError):
+            pass
+    try:
+        await process.wait()
+    except (OSError, ProcessLookupError):
+        pass
 
 
 def _is_googlevideo_host(hostname: str) -> bool:
@@ -172,15 +196,18 @@ class YtstreamDownloader(BaseDownloader):
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                start_new_session=True,
             )
             try:
                 _stdout, stderr = await asyncio.wait_for(
                     process.communicate(), timeout=FFMPEG_TIMEOUT_SEC
                 )
             except asyncio.TimeoutError:
-                process.kill()
-                await process.wait()
+                await _stop_ffmpeg(process)
                 raise FFmpegException("FFmpeg timed out") from None
+            except asyncio.CancelledError:
+                await _stop_ffmpeg(process)
+                raise
 
             if process.returncode != 0:
                 raise FFmpegException(stderr.decode(errors="replace"))

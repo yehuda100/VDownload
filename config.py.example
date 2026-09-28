@@ -3,6 +3,11 @@
 BOT_TOKEN = "123456:ABC-DEF..."
 USER_ID = 123456789
 URL = "https://your-domain.com/"
+
+# Optional. Telegram sends this in X-Telegram-Bot-Api-Secret-Token.
+# Must be 1-256 characters from A-Za-z0-9_-. Leave unset to derive one from BOT_TOKEN.
+# The public webhook path is /telegram-webhook (nginx must proxy that path).
+# WEBHOOK_SECRET = "change-me"
 SECRET_KEY = "change-me-to-a-long-random-string"
 
 RAPIDAPI_KEY = "your-rapidapi-key"
