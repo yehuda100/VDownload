@@ -227,6 +227,9 @@ cookies.txt
 *.cookies
 cookies/
 
+# Application log directory (bot.log and rotated backups)
+logs/
+
 # temp files
 temp_links/
 protected_downloads/
